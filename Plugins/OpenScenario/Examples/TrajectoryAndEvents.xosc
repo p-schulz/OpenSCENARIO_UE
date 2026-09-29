@@ -1,0 +1,47 @@
+<?xml version="1.0"?>
+<OpenSCENARIO>
+  <FileHeader revMajor="1" revMinor="2" description="World-position road attach, timed trajectory, event and act state triggers" author="OpenSCENARIO_UE"/>
+  <OpenScenarioCategory><ScenarioDefinition>
+  <ParameterDeclarations><ParameterDeclaration name="V" parameterType="double" value="8"/></ParameterDeclarations>
+  <RoadNetwork><LogicFile filepath="JunctionRoad.xodr"/></RoadNetwork>
+  <Entities>
+    <ScenarioObject name="A"><Vehicle name="c" vehicleCategory="car"><BoundingBox><Center x="1.4" y="0" z="0.75"/><Dimensions width="1.8" length="4.5" height="1.5"/></BoundingBox></Vehicle></ScenarioObject>
+    <ScenarioObject name="B"><Pedestrian name="p" pedestrianCategory="pedestrian" mass="80" model="m"/></ScenarioObject>
+  </Entities>
+  <Storyboard>
+    <Init><Actions>
+      <Private entityRef="A"><PrivateAction><TeleportAction><Position><WorldPosition x="10" y="-5.2" z="0" h="0"/></Position></TeleportAction></PrivateAction>
+        <PrivateAction><LongitudinalAction><SpeedAction><SpeedActionDynamics dynamicsShape="cubic" value="4" dynamicsDimension="time"/><SpeedActionTarget><AbsoluteTargetSpeed value="$V"/></SpeedActionTarget></SpeedAction></LongitudinalAction></PrivateAction></Private>
+      <Private entityRef="B"><PrivateAction><TeleportAction><Position><RelativeObjectPosition entityRef="A" dx="30" dy="5" dz="0"/></Position></TeleportAction></PrivateAction></Private>
+    </Actions></Init>
+    <Story name="S"><Act name="Act1">
+      <ManeuverGroup maximumExecutionCount="2" name="MG"><Actors selectTriggeringEntities="false"><EntityRef entityRef="B"/></Actors>
+        <Maneuver name="M">
+          <Event name="Walk" priority="parallel" maximumExecutionCount="1">
+            <Action name="Traj"><PrivateAction><RoutingAction><FollowTrajectoryAction>
+              <TrajectoryRef><Trajectory name="t" closed="false"><Shape><Polyline>
+                <Vertex time="0"><Position><WorldPosition x="40" y="5" z="0"/></Position></Vertex>
+                <Vertex time="2"><Position><WorldPosition x="40" y="-2" z="0"/></Position></Vertex>
+                <Vertex time="4"><Position><WorldPosition x="40" y="-6" z="0"/></Position></Vertex>
+              </Polyline></Shape></Trajectory></TrajectoryRef>
+              <TimeReference><Timing domainAbsoluteRelative="relative" scale="1" offset="0"/></TimeReference>
+              <TrajectoryFollowingMode followingMode="position"/>
+            </FollowTrajectoryAction></RoutingAction></PrivateAction></Action>
+            <StartTrigger><ConditionGroup><Condition name="c" delay="1" conditionEdge="rising"><ByValueCondition><SimulationTimeCondition value="1" rule="greaterThan"/></ByValueCondition></Condition></ConditionGroup></StartTrigger>
+          </Event>
+        </Maneuver>
+      </ManeuverGroup>
+      <StartTrigger><ConditionGroup><Condition name="s" delay="0" conditionEdge="rising"><ByValueCondition><SimulationTimeCondition value="0" rule="greaterOrEqual"/></ByValueCondition></Condition></ConditionGroup></StartTrigger>
+    </Act>
+    <Act name="Act2">
+      <ManeuverGroup maximumExecutionCount="1" name="MG2"><Actors selectTriggeringEntities="false"><EntityRef entityRef="A"/></Actors>
+        <Maneuver name="M2"><Event name="Stop" priority="skip" maximumExecutionCount="1">
+          <Action name="Brake"><PrivateAction><LongitudinalAction><SpeedAction><SpeedActionDynamics dynamicsShape="linear" value="4" dynamicsDimension="rate"/><SpeedActionTarget><AbsoluteTargetSpeed value="0"/></SpeedActionTarget></SpeedAction></LongitudinalAction></PrivateAction></Action>
+          <StartTrigger><ConditionGroup><Condition name="w" delay="0" conditionEdge="rising"><ByValueCondition><StoryboardElementStateCondition storyboardElementType="event" storyboardElementRef="Walk" state="endTransition"/></ByValueCondition></Condition></ConditionGroup></StartTrigger>
+        </Event></Maneuver></ManeuverGroup>
+      <StartTrigger><ConditionGroup><Condition name="s2" delay="0" conditionEdge="rising"><ByValueCondition><StoryboardElementStateCondition storyboardElementType="act" storyboardElementRef="Act1" state="startTransition"/></ByValueCondition></Condition></ConditionGroup></StartTrigger>
+    </Act></Story>
+    <StopTrigger><ConditionGroup><Condition name="stop" delay="0" conditionEdge="rising"><ByValueCondition><SimulationTimeCondition value="12" rule="greaterThan"/></ByValueCondition></Condition></ConditionGroup></StopTrigger>
+  </Storyboard>
+  </ScenarioDefinition></OpenScenarioCategory>
+</OpenSCENARIO>
