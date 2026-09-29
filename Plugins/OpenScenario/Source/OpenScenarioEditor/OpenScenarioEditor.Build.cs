@@ -16,9 +16,18 @@ public class OpenScenarioEditor : ModuleRules
 
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
+			"ApplicationCore",
+			"Slate",
+			"SlateCore",
+			"InputCore",
 			"UnrealEd",
+			"EditorFramework",
+			"PropertyEditor",
+			"DesktopPlatform",
+			"AssetTools",
 			"AssetRegistry",
-			"AssetDefinition"
+			"AssetDefinition",
+			"WorkspaceMenuStructure"
 		});
 	}
 }

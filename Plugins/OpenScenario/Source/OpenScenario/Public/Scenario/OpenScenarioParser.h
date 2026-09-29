@@ -29,7 +29,7 @@ private:
 	bool AttrB(const FXmlNode* Node, const TCHAR* Name, bool Default = false);
 
 	void Warn(const FString& Message);
-	void ReadParameterDeclarations(const FXmlNode* Node, const TMap<FString, FString>* Overrides);
+	void ReadParameterDeclarations(const FXmlNode* Node, const TMap<FString, FString>* Overrides, TArray<FOSCParameterDeclaration>* OutDeclarations = nullptr);
 
 	// Entities
 	void ParseEntities(const FXmlNode* EntitiesNode, FOSCScenario& Out);

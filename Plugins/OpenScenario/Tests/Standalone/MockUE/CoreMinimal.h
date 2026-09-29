@@ -30,6 +30,7 @@ typedef int32_t int32; typedef int64_t int64; typedef uint8_t uint8; typedef uin
 #define UCLASS(...)
 #define USTRUCT(...)
 #define UPROPERTY(...)
+#define UENUM(...)
 #define UFUNCTION(...)
 struct UClass {};
 #define GENERATED_BODY() public: typedef UObject Super; static UClass* StaticClass(){ static UClass c; return &c; }
@@ -77,6 +78,7 @@ public:
 };
 inline FString operator+(const char* a, const FString& b) { return FString(a) + b; }
 
+template <class F> using TFunction = std::function<F>;
 template <class K, class V> struct TPair { K Key; V Value; TPair() {} TPair(const K& k, const V& v) : Key(k), Value(v) {} };
 
 template <class T> class TArray {
@@ -98,6 +100,11 @@ public:
 	auto begin() { return V.begin(); } auto end() { return V.end(); }
 	auto begin() const { return V.begin(); } auto end() const { return V.end(); }
 	template <class P> void Sort(P p) { std::stable_sort(V.begin(), V.end(), p); }
+	int32 AddDefaulted() { V.emplace_back(); return Num() - 1; }
+	void RemoveAt(int32 i) { V.erase(V.begin() + i); }
+	void Insert(const T& t, int32 i) { V.insert(V.begin() + i, t); }
+	void Swap(int32 a, int32 b) { std::swap(V[a], V[b]); }
+	bool Contains(const T& t) const { for (auto& x : V) if (x == t) return true; return false; }
 };
 namespace Algo { template <class A> void Reverse(A& a) { std::reverse(a.V.begin(), a.V.end()); } }
 
@@ -166,6 +173,7 @@ class UObject { public: virtual ~UObject() {} FString GetPathName() const { retu
 class USceneComponent {}; class UStaticMeshComponent {}; class UAssetImportData {};
 
 template <class T> struct TObjectPtr { T* P = nullptr; TObjectPtr() {} TObjectPtr(T* p) : P(p) {} TObjectPtr& operator=(T* p) { P = p; return *this; } T* Get() const { return P; } T* operator->() const { return P; } operator T*() const { return P; } explicit operator bool() const { return P != nullptr; } };
+template <class T> struct TSoftClassPtr { UClass* C = nullptr; UClass* LoadSynchronous() const { return C; } bool IsNull() const { return C == nullptr; } };
 template <class T> struct TSubclassOf { UClass* C = nullptr; TSubclassOf() {} TSubclassOf(UClass* c) : C(c) {} UClass* Get() const { return C; } explicit operator bool() const { return C != nullptr; } };
 template <class T, class U> T* Cast(U* p) { return dynamic_cast<T*>(p); }
 
@@ -178,6 +186,7 @@ class UWorld : public UObject { public: AActor* SpawnActor(UClass*, const FTrans
 template <class... A> struct TMulticastMock { std::vector<std::function<void(A...)>> F; void Broadcast(A... a) { for (auto& f : F) f(a...); } };
 #define DECLARE_MULTICAST_DELEGATE_TwoParams(Name, T1, T2) typedef TMulticastMock<T1, T2> Name;
 #define DECLARE_MULTICAST_DELEGATE(Name) typedef TMulticastMock<> Name;
+typedef TMulticastMock<> FSimpleMulticastDelegate;
 
 struct FPaths {
 	static bool IsRelative(const FString& p) { return !std::filesystem::path(p.S).is_absolute(); }

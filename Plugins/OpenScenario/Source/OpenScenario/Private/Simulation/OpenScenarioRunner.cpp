@@ -9,6 +9,8 @@
 namespace
 {
 	constexpr double kPi = UE_DOUBLE_PI;
+	/** Spacing of the look-ahead samples (m). */
+	constexpr double LookAheadStep = 2.0;
 
 	/** Lane ids skip 0: moving `Delta` lanes from `Lane` crosses the centre without landing on it. */
 	int32 ShiftLane(int32 Lane, int32 Delta)
@@ -146,10 +148,16 @@ const FOSCEntityState* UOpenScenarioRunner::FindEntity(const FString& Name) cons
 
 void UOpenScenarioRunner::SpawnEntityActor(FOSCEntityState& E)
 {
+	// Precedence: actor per-entity override, asset per-entity mapping, actor per-kind default,
+	// asset per-kind mapping, built-in box actor.
 	TSubclassOf<AActor> Class;
 	if (const TSubclassOf<AActor>* Override = EntityClassOverrides.Find(E.Name))
 	{
 		Class = *Override;
+	}
+	if (!Class && Asset)
+	{
+		Class = Asset->FindEntityActorClass(E.Name);
 	}
 	if (!Class)
 	{
@@ -160,6 +168,10 @@ void UOpenScenarioRunner::SpawnEntityActor(FOSCEntityState& E)
 		default: Class = DefaultVehicleClass; break;
 		}
 	}
+	if (!Class && Asset)
+	{
+		Class = Asset->FindKindActorClass(E.Def.Kind);
+	}
 	if (!Class)
 	{
 		Class = AOpenScenarioEntityActor::StaticClass();
@@ -167,6 +179,14 @@ void UOpenScenarioRunner::SpawnEntityActor(FOSCEntityState& E)
 
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+#if WITH_EDITOR
+	if (!World->IsGameWorld())
+	{
+		// Simulating in the editor viewport: entity actors must not be saved or recorded for undo.
+		Params.bTemporaryEditorActor = true;
+		Params.ObjectFlags |= RF_Transient;
+	}
+#endif
 	AActor* Actor = World->SpawnActor(Class.Get(), &Origin, Params);
 	if (!Actor)
 	{
@@ -263,16 +283,16 @@ void UOpenScenarioRunner::Step(double Dt)
 			UpdateInstance(Instances[i], Dt);
 		}
 	}
-	for (int32 i = 0; i < Entities.Num(); ++i)
-	{
-		Entities[i].Accel = (Entities[i].Speed - PrevSpeed[i]) / Dt;
-	}
-
 	UpdateStoryboard();
 
 	for (FOSCEntityState& E : Entities)
 	{
+		UpdateDynamics(E, Dt);
 		UpdateMotion(E, Dt);
+	}
+	for (int32 i = 0; i < Entities.Num(); ++i)
+	{
+		Entities[i].Accel = (Entities[i].Speed - PrevSpeed[i]) / Dt;
 	}
 	SyncActors();
 }
@@ -846,6 +866,8 @@ double UOpenScenarioRunner::ShapeFactor(EOSCShape Shape, double P)
 
 void UOpenScenarioRunner::RunInitActions()
 {
+	// Speeds set in Init apply immediately, even under simple dynamics.
+	bInitPhase = true;
 	// Teleports first so that relative positions and lane bindings are established before speeds.
 	for (int32 Pass = 0; Pass < 2; ++Pass)
 	{
@@ -861,6 +883,7 @@ void UOpenScenarioRunner::RunInitActions()
 			}
 		}
 	}
+	bInitPhase = false;
 }
 
 int32 UOpenScenarioRunner::CreateInstance(FOSCAction& Action, const FString& EntityName)
@@ -917,6 +940,7 @@ void UOpenScenarioRunner::EndLaneChange(FOSCEntityState& E, bool bToTarget)
 		E.LaneOffset = CurrentT - Map->GetLaneCenterT(*Road, E.S, E.LaneId);
 	}
 	E.bLaneChanging = false;
+	E.LookAhead.bValid = false;
 }
 
 void UOpenScenarioRunner::CancelInstance(FOSCActionInstance& Inst)
@@ -968,6 +992,7 @@ void UOpenScenarioRunner::InitInstance(FOSCActionInstance& Inst)
 			E.bLaneChanging = false;
 			E.Route.Reset();
 			E.RouteIndex = 0;
+			E.LookAhead.bValid = false;
 			E.bTeleported = true;
 		}
 		else
@@ -979,7 +1004,7 @@ void UOpenScenarioRunner::InitInstance(FOSCActionInstance& Inst)
 	}
 	case EOSCActionType::Speed:
 	{
-		Inst.V0 = E.Speed;
+		Inst.V0 = UsesSimpleDynamics(E) ? E.DesiredSpeed : E.Speed;
 		Inst.VTarget = A.SpeedValue;
 		if (A.bSpeedRelative)
 		{
@@ -1006,8 +1031,16 @@ void UOpenScenarioRunner::InitInstance(FOSCActionInstance& Inst)
 		}
 		if (A.Dynamics.Shape == EOSCShape::Step || Inst.Duration <= 1e-9)
 		{
-			E.Speed = Inst.VTarget;
-			FinishInstance(Inst);
+			SetCommandedSpeed(E, Inst.VTarget);
+			// Under simple dynamics the vehicle still has to get there; UpdateSpeedInstance finishes the action.
+			if (!UsesSimpleDynamics(E) || bInitPhase)
+			{
+				FinishInstance(Inst);
+			}
+			else
+			{
+				Inst.Duration = 0.0;
+			}
 		}
 		break;
 	}
@@ -1039,6 +1072,7 @@ void UOpenScenarioRunner::InitInstance(FOSCActionInstance& Inst)
 		}
 		Target = Map->ClampLaneId(*Road, E.S, Target);
 
+		E.LookAhead.bValid = false;
 		E.bLaneChanging = true;
 		E.LCSourceLane = E.LaneId;
 		E.LCTargetLane = Target;
@@ -1134,11 +1168,16 @@ void UOpenScenarioRunner::UpdateSpeedInstance(FOSCActionInstance& Inst, FOSCEnti
 {
 	Inst.Elapsed += Dt;
 	const double P = Inst.Duration > 1e-9 ? Inst.Elapsed / Inst.Duration : 1.0;
-	E.Speed = Inst.V0 + (Inst.VTarget - Inst.V0) * ShapeFactor(Inst.Def->Dynamics.Shape, P);
+	SetCommandedSpeed(E, Inst.V0 + (Inst.VTarget - Inst.V0) * ShapeFactor(Inst.Def->Dynamics.Shape, P));
 	if (P >= 1.0)
 	{
-		E.Speed = Inst.VTarget;
-		FinishInstance(Inst);
+		SetCommandedSpeed(E, Inst.VTarget);
+		// With simple dynamics the action completes once the vehicle has reached the target, or as close
+		// as limits, curves or traffic allow.
+		if (!UsesSimpleDynamics(E) || FMath::Abs(E.Speed - Inst.VTarget) < 0.2 || E.bSpeedConstrained)
+		{
+			FinishInstance(Inst);
+		}
 	}
 }
 
@@ -1242,10 +1281,12 @@ void UOpenScenarioRunner::UpdateTrajectoryInstance(FOSCActionInstance& Inst, FOS
 	E.X = Pos.X; E.Y = Pos.Y; E.Z = Pos.Z;
 	E.Heading = Heading;
 
+	E.DesiredSpeed = E.Speed;
 	if (bDone)
 	{
 		E.bTrajectoryControlled = false;
 		AttachToRoad(E);
+		E.LookAhead.bValid = false;
 		FinishInstance(Inst);
 	}
 }
@@ -1289,6 +1330,7 @@ void UOpenScenarioRunner::AssignRoute(const FOSCAction& Action, FOSCEntityState&
 	}
 	E.Route = MoveTemp(Route);
 	E.RouteIndex = 0;
+	E.LookAhead.bValid = false;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -1557,6 +1599,7 @@ void UOpenScenarioRunner::AdvanceOnRoad(FOSCEntityState& E, double Ds)
 		{
 			// Dead end: the vehicle stops at the end of the road.
 			E.Speed = 0.0;
+			E.DesiredSpeed = 0.0;
 			break;
 		}
 
@@ -1564,6 +1607,7 @@ void UOpenScenarioRunner::AdvanceOnRoad(FOSCEntityState& E, double Ds)
 		if (!Next)
 		{
 			E.Speed = 0.0;
+			E.DesiredSpeed = 0.0;
 			break;
 		}
 
@@ -1604,4 +1648,362 @@ void UOpenScenarioRunner::AdvanceOnRoad(FOSCEntityState& E, double Ds)
 			E.LaneId = Map->ClampLaneId(*Road, E.S, E.LaneId);
 		}
 	}
+}
+
+// ------------------------------------------------------------------------------------------------
+// Simple vehicle dynamics
+// ------------------------------------------------------------------------------------------------
+
+bool UOpenScenarioRunner::UsesSimpleDynamics(const FOSCEntityState& E) const
+{
+	return Dynamics.Mode == EOpenScenarioDynamicsMode::Simple && E.Def.Kind == EOSCEntityKind::Vehicle && !E.bTrajectoryControlled;
+}
+
+void UOpenScenarioRunner::SetCommandedSpeed(FOSCEntityState& E, double Speed) const
+{
+	E.DesiredSpeed = Speed;
+	if (bInitPhase || !UsesSimpleDynamics(E))
+	{
+		E.Speed = Speed;
+	}
+}
+
+bool UOpenScenarioRunner::AdvanceCursor(FRoadCursor& C, const TArray<FOpenDriveRouteStep>& Route, double Ds) const
+{
+	double Remaining = Ds;
+	TArray<FOpenDriveSuccessor> Successors;
+	for (int32 Guard = 0; Guard < 16; ++Guard)
+	{
+		const FOpenDriveRoad* Road = Map->FindRoad(C.RoadId);
+		if (!Road)
+		{
+			return false;
+		}
+		const double Room = C.bForward ? Road->Length - C.S : C.S;
+		if (Remaining <= Room + 1e-9)
+		{
+			C.S += C.bForward ? Remaining : -Remaining;
+			return true;
+		}
+		Remaining -= Room;
+		C.S = C.bForward ? Road->Length : 0.0;
+
+		Map->GetSuccessors(*Road, C.bForward, Successors);
+		const FOpenDriveSuccessor* Chosen = nullptr;
+		bool bFollowsRoute = false;
+		if (Route.IsValidIndex(C.RouteIndex + 1))
+		{
+			const FOpenDriveRouteStep& Next = Route[C.RouteIndex + 1];
+			for (const FOpenDriveSuccessor& S : Successors)
+			{
+				if (S.RoadId == Next.RoadId && S.bForward == Next.bForward)
+				{
+					Chosen = &S;
+					bFollowsRoute = true;
+					break;
+				}
+			}
+		}
+		if (!Chosen)
+		{
+			for (const FOpenDriveSuccessor& S : Successors)
+			{
+				if (S.LaneMap.Contains(C.LaneId))
+				{
+					Chosen = &S;
+					break;
+				}
+			}
+		}
+		if (!Chosen && Successors.Num() > 0)
+		{
+			Chosen = &Successors[0];
+		}
+		const FOpenDriveRoad* NextRoad = Chosen ? Map->FindRoad(Chosen->RoadId) : nullptr;
+		if (!NextRoad)
+		{
+			return false;
+		}
+
+		const bool bWithFlow = (C.bForward == (C.LaneId < 0));
+		int32 NewLane;
+		if (const int32* Mapped = Chosen->LaneMap.Find(C.LaneId))
+		{
+			NewLane = *Mapped;
+		}
+		else
+		{
+			NewLane = ((Chosen->bForward == bWithFlow) ? -1 : 1) * FMath::Max(1, FMath::Abs(C.LaneId));
+		}
+		if (bFollowsRoute)
+		{
+			++C.RouteIndex;
+		}
+		C.RoadId = NextRoad->Id;
+		C.bForward = Chosen->bForward;
+		C.S = C.bForward ? 0.0 : NextRoad->Length;
+		C.LaneId = Map->ClampLaneId(*NextRoad, C.S, NewLane);
+	}
+	return false;
+}
+
+void UOpenScenarioRunner::BuildLookAhead(FOSCEntityState& E, double Distance)
+{
+	constexpr double Step = LookAheadStep;
+	FLookAheadCache& C = E.LookAhead;
+	C.Samples.Reset();
+	C.bValid = true;
+	C.TravelledAtBuild = E.TravelledDistance;
+	C.TimeBuilt = SimTime;
+	C.CoveredDistance = Distance;
+
+	if (E.bOnRoad && Map.IsValid())
+	{
+		FRoadCursor Cursor;
+		Cursor.RoadId = E.RoadId;
+		Cursor.S = E.S;
+		Cursor.LaneId = E.bLaneChanging ? E.LCTargetLane : E.LaneId;
+		Cursor.bForward = E.bDirForward;
+		Cursor.RouteIndex = E.RouteIndex;
+
+		// Samples lie on a fixed grid of travelled distance (plus one at the current position), so the
+		// look-ahead is stable when it is rebuilt while the vehicle moves.
+		double FirstGrid = Step - FMath::Fmod(E.TravelledDistance, Step);
+		if (FirstGrid < 0.05)
+		{
+			FirstGrid += Step;
+		}
+		bool bFirstSample = true;
+		for (double D = 0.0; D <= Distance;)
+		{
+			const FOpenDriveRoad* Road = Map->FindRoad(Cursor.RoadId);
+			if (!Road)
+			{
+				break;
+			}
+			const int32 Lane = Map->ClampLaneId(*Road, Cursor.S, Cursor.LaneId);
+			const FOpenDrivePose Pose = Map->EvaluatePose(*Road, Cursor.S, Map->GetLaneCenterT(*Road, Cursor.S, Lane));
+
+			double Limit = -1.0;
+			if (Dynamics.bRespectSpeedLimits)
+			{
+				const double RoadLimit = Map->GetSpeedLimit(*Road, Cursor.S, Lane);
+				if (RoadLimit >= 0.0)
+				{
+					Limit = RoadLimit * Dynamics.SpeedLimitFactor;
+				}
+			}
+			if (Dynamics.bSlowInCurves)
+			{
+				const double K = FMath::Abs(Map->GetLaneCurvature(*Road, Cursor.S, Lane));
+				if (K > 1e-4)
+				{
+					const double CurveSpeed = FMath::Sqrt(Dynamics.MaxLateralAcceleration / K);
+					Limit = Limit < 0.0 ? CurveSpeed : FMath::Min(Limit, CurveSpeed);
+				}
+			}
+
+			FLookAheadSample Sample;
+			Sample.Dist = D;
+			Sample.VLimit = Limit;
+			Sample.X = Pose.X;
+			Sample.Y = Pose.Y;
+			C.Samples.Add(Sample);
+
+			const double NextD = bFirstSample ? FirstGrid : D + Step;
+			bFirstSample = false;
+			if (!AdvanceCursor(Cursor, E.Route, NextD - D))
+			{
+				// Dead end: plan to stand at the end of the road.
+				if (const FOpenDriveRoad* Last = Map->FindRoad(Cursor.RoadId))
+				{
+					const FOpenDrivePose End = Map->EvaluatePose(*Last, Cursor.S, Map->GetLaneCenterT(*Last, Cursor.S, Lane));
+					FLookAheadSample Stop;
+					Stop.Dist = D + 0.5 * Step;
+					Stop.VLimit = 0.0;
+					Stop.X = End.X;
+					Stop.Y = End.Y;
+					C.Samples.Add(Stop);
+				}
+				break;
+			}
+			D = NextD;
+		}
+	}
+	else
+	{
+		for (double D = 0.0; D <= Distance; D += Step)
+		{
+			FLookAheadSample Sample;
+			Sample.Dist = D;
+			Sample.X = E.X + FMath::Cos(E.Heading) * D;
+			Sample.Y = E.Y + FMath::Sin(E.Heading) * D;
+			C.Samples.Add(Sample);
+		}
+	}
+}
+
+bool UOpenScenarioRunner::FindLeader(const FOSCEntityState& E, double LookDistance, double& OutGap, double& OutLeaderSpeed, FString& OutName) const
+{
+	const FLookAheadCache& C = E.LookAhead;
+	if (C.Samples.Num() < 2)
+	{
+		return false;
+	}
+	const double Along = E.TravelledDistance - C.TravelledAtBuild;
+	const double FrontSelf = E.Def.CenterX + 0.5 * E.Def.Length;
+
+	bool bFound = false;
+	OutGap = TNumericLimits<double>::Max();
+	for (const FOSCEntityState& O : Entities)
+	{
+		if (&O == &E || O.Def.Kind == EOSCEntityKind::External)
+		{
+			continue;
+		}
+		const double Ch = FMath::Cos(O.Heading);
+		const double Sh = FMath::Sin(O.Heading);
+		const double Ox = O.X + Ch * O.Def.CenterX - Sh * O.Def.CenterY;
+		const double Oy = O.Y + Sh * O.Def.CenterX + Ch * O.Def.CenterY;
+
+		// Closest point of the planned path to the other actor's centre.
+		double BestLat = TNumericLimits<double>::Max();
+		double BestAlong = 0.0;
+		double DirX = 1.0, DirY = 0.0;
+		for (int32 i = 0; i + 1 < C.Samples.Num(); ++i)
+		{
+			const FLookAheadSample& A = C.Samples[i];
+			const FLookAheadSample& B = C.Samples[i + 1];
+			const double Dx = B.X - A.X;
+			const double Dy = B.Y - A.Y;
+			const double Len2 = Dx * Dx + Dy * Dy;
+			if (Len2 < 1e-9)
+			{
+				continue;
+			}
+			const double U = FMath::Clamp(((Ox - A.X) * Dx + (Oy - A.Y) * Dy) / Len2, 0.0, 1.0);
+			const double Lat = FMath::Sqrt(FMath::Square(Ox - (A.X + U * Dx)) + FMath::Square(Oy - (A.Y + U * Dy)));
+			if (Lat < BestLat)
+			{
+				BestLat = Lat;
+				const double Len = FMath::Sqrt(Len2);
+				BestAlong = A.Dist + U * Len;
+				DirX = Dx / Len;
+				DirY = Dy / Len;
+			}
+		}
+		if (BestLat == TNumericLimits<double>::Max())
+		{
+			continue;
+		}
+		const double Rel = BestAlong - Along;
+		if (Rel <= 0.0 || Rel > LookDistance + O.Def.Length)
+		{
+			continue;
+		}
+
+		const double Angle = O.Heading - FMath::Atan2(DirY, DirX);
+		const double CosD = FMath::Cos(Angle);
+		const double SinD = FMath::Sin(Angle);
+		const double LatExtent = 0.5 * O.Def.Width * FMath::Abs(CosD) + 0.5 * O.Def.Length * FMath::Abs(SinD);
+		const double LongExtent = 0.5 * O.Def.Length * FMath::Abs(CosD) + 0.5 * O.Def.Width * FMath::Abs(SinD);
+		if (BestLat > 0.5 * E.Def.Width + LatExtent + 0.3)
+		{
+			continue;
+		}
+		const double Gap = FMath::Max(0.01, Rel - LongExtent - FrontSelf);
+		if (Gap < OutGap)
+		{
+			bFound = true;
+			OutGap = Gap;
+			OutLeaderSpeed = O.Speed * CosD;
+			OutName = O.Name;
+		}
+	}
+	return bFound;
+}
+
+void UOpenScenarioRunner::UpdateDynamics(FOSCEntityState& E, double Dt)
+{
+	if (!UsesSimpleDynamics(E) || E.Speed < -1e-6 || E.DesiredSpeed < 0.0)
+	{
+		// Kinematic mode, pedestrians/objects, trajectories and reversing: speed is exactly what is commanded.
+		E.DesiredSpeed = E.Speed;
+		E.bSpeedConstrained = false;
+		E.LeaderGap = -1.0;
+		E.LeaderName.Reset();
+		return;
+	}
+
+	const double V = E.Speed;
+	const double AMax = FMath::Max(0.1, FMath::Min(E.Def.MaxAcceleration, Dynamics.MaxAcceleration));
+	const double BMax = FMath::Max(0.1, FMath::Min(E.Def.MaxDeceleration, Dynamics.MaxDeceleration));
+	const double BComfort = FMath::Min(Dynamics.ComfortDeceleration, BMax);
+	const double VDesired = E.Def.MaxSpeed > 0.0 ? FMath::Min(E.DesiredSpeed, E.Def.MaxSpeed) : E.DesiredSpeed;
+
+	const double Look = FMath::Clamp(V * V / (2.0 * BComfort) + V * Dynamics.TimeHeadway + 30.0, 30.0, Dynamics.MaxLookAhead);
+	FLookAheadCache& Cache = E.LookAhead;
+	double Along = E.TravelledDistance - Cache.TravelledAtBuild;
+	const double MaxAge = E.bLaneChanging ? 0.2 : 0.5;
+	if (!Cache.bValid || Along > 5.0 || SimTime - Cache.TimeBuilt > MaxAge || Cache.CoveredDistance - Along < Look)
+	{
+		BuildLookAhead(E, Look + 20.0);
+		Along = 0.0;
+	}
+
+	// Fastest speed from which the vehicle can still brake to every limit ahead.
+	double VEnvelope = TNumericLimits<double>::Max();
+	for (const FLookAheadSample& Sample : Cache.Samples)
+	{
+		// Samples are spaced LookAheadStep apart; a limit is assumed to start one step before its sample so the
+		// discretisation never lets the vehicle overshoot it.
+		if (Sample.VLimit < 0.0 || Sample.Dist < Along - LookAheadStep)
+		{
+			continue;
+		}
+		const double D = FMath::Max(0.0, Sample.Dist - Along - LookAheadStep);
+		VEnvelope = FMath::Min(VEnvelope, FMath::Sqrt(Sample.VLimit * Sample.VLimit + 2.0 * BComfort * D));
+	}
+
+	const double VTarget = FMath::Min(VDesired, VEnvelope);
+	double A = FMath::Clamp((VTarget - V) / Dt, -BMax, AMax);
+	if (Dynamics.MaxJerk > 0.0 && A < 0.0)
+	{
+		// The envelope moves in steps when the look-ahead is rebuilt; let the braking build up smoothly.
+		// (Releasing the throttle is immediate, otherwise the vehicle would overshoot its target speed.)
+		A = FMath::Max(A, FMath::Min(E.CmdAccel, 0.0) - Dynamics.MaxJerk * Dt);
+	}
+	bool bConstrained = VEnvelope < VDesired - 0.3;
+
+	double Gap = -1.0;
+	double LeaderSpeed = 0.0;
+	FString Leader;
+	if (Dynamics.bBrakeForObstacles && FindLeader(E, Look, Gap, LeaderSpeed, Leader))
+	{
+		const double SStar = Dynamics.MinGap + FMath::Max(0.0, V * Dynamics.TimeHeadway + V * (V - LeaderSpeed) / (2.0 * FMath::Sqrt(AMax * BComfort)));
+		double AFollow = Gap > 0.05 ? AMax * (1.0 - FMath::Square(SStar / Gap)) : -BMax;
+		AFollow = FMath::Max(AFollow, -BMax);
+		if (AFollow < A)
+		{
+			A = AFollow;
+			bConstrained = true;
+		}
+		E.LeaderGap = Gap;
+		E.LeaderName = Leader;
+	}
+	else
+	{
+		E.LeaderGap = -1.0;
+		E.LeaderName.Reset();
+	}
+
+	E.CmdAccel = A;
+	double VNew = FMath::Max(0.0, V + A * Dt);
+	if (VTarget <= 0.01 && VNew < 0.05)
+	{
+		VNew = 0.0;
+		E.CmdAccel = 0.0;
+	}
+	E.Speed = VNew;
+	E.bSpeedConstrained = bConstrained;
 }

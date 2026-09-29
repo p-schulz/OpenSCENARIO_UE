@@ -64,6 +64,13 @@ struct OPENSCENARIO_API FOpenDriveGeometry
 	bool bNormalizedRange = false;
 };
 
+/** Speed limit valid from S (absolute road s) on, in m/s. */
+struct FOpenDriveSpeedLimit
+{
+	double S = 0.0;
+	double MaxSpeed = 0.0;
+};
+
 struct OPENSCENARIO_API FOpenDriveLane
 {
 	int32 Id = 0;
@@ -73,6 +80,8 @@ struct OPENSCENARIO_API FOpenDriveLane
 	int32 Successor = 0;
 	/** Absolute-s width entries (sOffset already added to the lane section start). */
 	TArray<FOpenDriveCubic> Widths;
+	/** Lane speed limits (absolute s). */
+	TArray<FOpenDriveSpeedLimit> SpeedLimits;
 
 	double GetWidth(double AbsS) const
 	{
@@ -120,6 +129,8 @@ struct OPENSCENARIO_API FOpenDriveRoad
 	TArray<FOpenDriveCubic> Elevation;
 	TArray<FOpenDriveCubic> LaneOffset;
 	TArray<FOpenDriveLaneSection> LaneSections;
+	/** Road-type speed limits (absolute s), used where a lane has none. */
+	TArray<FOpenDriveSpeedLimit> SpeedLimits;
 
 	// Derived at load time, used to prune spatial queries.
 	double MinX = 0.0, MinY = 0.0, MaxX = 0.0, MaxY = 0.0;
@@ -215,6 +226,13 @@ public:
 	int32 FindLaneAt(const FOpenDriveRoad& Road, double S, double T) const;
 	/** Returns LaneId if it exists at S, otherwise the closest existing lane of the same side. */
 	int32 ClampLaneId(const FOpenDriveRoad& Road, double S, int32 LaneId) const;
+
+	/** Speed limit in m/s valid for the lane at S (lane limit first, then road type), or a negative value if none. */
+	double GetSpeedLimit(const FOpenDriveRoad& Road, double S, int32 LaneId) const;
+	/** Signed curvature (1/m, positive = turning left) of the reference line at S. */
+	double GetReferenceCurvature(const FOpenDriveRoad& Road, double S) const;
+	/** Signed curvature of the path along the centre of the given lane. */
+	double GetLaneCurvature(const FOpenDriveRoad& Road, double S, int32 LaneId) const;
 
 	// --- Queries ------------------------------------------------------------------------------
 	/** Closest road position to a world point. Only roads within MaxDistance of their surface qualify. */
