@@ -2,6 +2,8 @@
 #include "OpenDrive/OpenDriveAsset.h"
 #include "OpenDrive/OpenDriveMap.h"
 #include "Scenario/OpenScenarioParser.h"
+#include "Scenario/OpenScenarioWriter.h"
+#include "GameFramework/Actor.h"
 #include "OpenScenarioModule.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -52,6 +54,26 @@ void UOpenScenarioAsset::Reparse()
 		Scenario = FOSCScenario();
 		UE_LOG(LogOpenScenario, Warning, TEXT("OpenSCENARIO asset '%s' failed to parse: %s"), *GetPathName(), ParseMessages.Num() > 0 ? *ParseMessages.Last() : TEXT("unknown error"));
 	}
+	OnReparsed.Broadcast();
+}
+
+bool UOpenScenarioAsset::ApplyScenarioModel(const FOSCScenario& Model)
+{
+	return SetSource(FOpenScenarioWriter::Write(Model), SourceFilename);
+}
+
+UClass* UOpenScenarioAsset::FindEntityActorClass(const FString& EntityName) const
+{
+	const TSoftClassPtr<AActor>* Mapped = EntityActorClasses.Find(EntityName);
+	return (Mapped && !Mapped->IsNull()) ? Mapped->LoadSynchronous() : nullptr;
+}
+
+UClass* UOpenScenarioAsset::FindKindActorClass(EOSCEntityKind Kind) const
+{
+	const TSoftClassPtr<AActor>* Mapped = &VehicleActorClass;
+	if (Kind == EOSCEntityKind::Pedestrian) { Mapped = &PedestrianActorClass; }
+	else if (Kind == EOSCEntityKind::MiscObject || Kind == EOSCEntityKind::External) { Mapped = &MiscObjectActorClass; }
+	return Mapped->IsNull() ? nullptr : Mapped->LoadSynchronous();
 }
 
 bool UOpenScenarioAsset::ReadReferencedRoadNetworkFile(FString& OutXml, FString& OutResolvedPath) const
@@ -275,6 +297,12 @@ void UOpenScenarioAsset::GetAssetRegistryTags(FAssetRegistryTagsContext Context)
 }
 
 #if WITH_EDITOR
+void UOpenScenarioAsset::PostEditUndo()
+{
+	Super::PostEditUndo();
+	Reparse();
+}
+
 void UOpenScenarioAsset::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);

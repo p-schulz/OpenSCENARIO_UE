@@ -196,7 +196,7 @@ bool FOpenScenarioParser::AttrB(const FXmlNode* Node, const TCHAR* Name, bool De
 	return TryAttr(Node, Name, V) ? OSCXml::ParseBool(V) : Default;
 }
 
-void FOpenScenarioParser::ReadParameterDeclarations(const FXmlNode* Node, const TMap<FString, FString>* Overrides)
+void FOpenScenarioParser::ReadParameterDeclarations(const FXmlNode* Node, const TMap<FString, FString>* Overrides, TArray<FOSCParameterDeclaration>* OutDeclarations)
 {
 	for (const FXmlNode* P : OSCXml::Children(Node, TEXT("ParameterDeclaration")))
 	{
@@ -207,6 +207,14 @@ void FOpenScenarioParser::ReadParameterDeclarations(const FXmlNode* Node, const 
 		if (Name.IsEmpty())
 		{
 			continue;
+		}
+		if (OutDeclarations)
+		{
+			FOSCParameterDeclaration Decl;
+			Decl.Name = Name;
+			Decl.Value = Value;
+			OSCXml::TryAttr(P, TEXT("parameterType"), Decl.Type);
+			OutDeclarations->Add(MoveTemp(Decl));
 		}
 		if (Overrides)
 		{
@@ -269,7 +277,7 @@ bool FOpenScenarioParser::Parse(const FString& Xml, const FString& BaseDirectory
 		return false;
 	}
 
-	ReadParameterDeclarations(OSCXml::Child(Def, TEXT("ParameterDeclarations")), &ParameterOverrides);
+	ReadParameterDeclarations(OSCXml::Child(Def, TEXT("ParameterDeclarations")), &ParameterOverrides, &Out.ParameterDeclarations);
 
 	if (const FXmlNode* Catalogs = OSCXml::Child(Def, TEXT("CatalogLocations")))
 	{

@@ -146,10 +146,16 @@ const FOSCEntityState* UOpenScenarioRunner::FindEntity(const FString& Name) cons
 
 void UOpenScenarioRunner::SpawnEntityActor(FOSCEntityState& E)
 {
+	// Precedence: actor per-entity override, asset per-entity mapping, actor per-kind default,
+	// asset per-kind mapping, built-in box actor.
 	TSubclassOf<AActor> Class;
 	if (const TSubclassOf<AActor>* Override = EntityClassOverrides.Find(E.Name))
 	{
 		Class = *Override;
+	}
+	if (!Class && Asset)
+	{
+		Class = Asset->FindEntityActorClass(E.Name);
 	}
 	if (!Class)
 	{
@@ -159,6 +165,10 @@ void UOpenScenarioRunner::SpawnEntityActor(FOSCEntityState& E)
 		case EOSCEntityKind::MiscObject: Class = DefaultMiscObjectClass; break;
 		default: Class = DefaultVehicleClass; break;
 		}
+	}
+	if (!Class && Asset)
+	{
+		Class = Asset->FindKindActorClass(E.Def.Kind);
 	}
 	if (!Class)
 	{

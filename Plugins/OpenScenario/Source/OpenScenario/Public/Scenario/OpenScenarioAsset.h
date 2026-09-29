@@ -5,6 +5,7 @@
 #include "Scenario/OpenScenarioModel.h"
 #include "OpenScenarioAsset.generated.h"
 
+class AActor;
 class UAssetImportData;
 class UOpenDriveAsset;
 class FOpenDriveMap;
@@ -51,6 +52,20 @@ public:
 	UPROPERTY(VisibleAnywhere, Category = "OpenSCENARIO|Info")
 	TArray<FString> EntityNames;
 
+	/** Actor class spawned for entities of the given kind (overridable per entity below). */
+	UPROPERTY(EditAnywhere, Category = "OpenSCENARIO|Actor Mapping")
+	TSoftClassPtr<AActor> VehicleActorClass;
+
+	UPROPERTY(EditAnywhere, Category = "OpenSCENARIO|Actor Mapping")
+	TSoftClassPtr<AActor> PedestrianActorClass;
+
+	UPROPERTY(EditAnywhere, Category = "OpenSCENARIO|Actor Mapping")
+	TSoftClassPtr<AActor> MiscObjectActorClass;
+
+	/** Actor class per scenario entity name (e.g. "Ego"). Takes precedence over the per-kind classes. */
+	UPROPERTY(EditAnywhere, Category = "OpenSCENARIO|Actor Mapping")
+	TMap<FString, TSoftClassPtr<AActor>> EntityActorClasses;
+
 	/** Parser warnings and errors from the last parse. */
 	UPROPERTY(VisibleAnywhere, Category = "OpenSCENARIO|Info")
 	TArray<FString> ParseMessages;
@@ -73,6 +88,17 @@ public:
 
 	const FOSCScenario& GetScenario() const { return Scenario; }
 
+	/** Serialises the model back to XML (see FOpenScenarioWriter for what is preserved) and re-parses it. */
+	bool ApplyScenarioModel(const FOSCScenario& Model);
+
+	/** Loaded class mapped to the entity by name, or null. */
+	UClass* FindEntityActorClass(const FString& EntityName) const;
+	/** Loaded class mapped to the entity kind, or null. */
+	UClass* FindKindActorClass(EOSCEntityKind Kind) const;
+
+	/** Broadcast after every (re)parse, e.g. so editor tools can refresh. */
+	FSimpleMulticastDelegate OnReparsed;
+
 	/** Directory used to resolve relative paths (directory of the original .xosc, else the project dir). */
 	FString GetBaseDirectory() const;
 
@@ -87,6 +113,9 @@ public:
 	//~ UObject
 	virtual void PostInitProperties() override;
 	virtual void PostLoad() override;
+#if WITH_EDITOR
+	virtual void PostEditUndo() override;
+#endif
 	virtual void GetAssetRegistryTags(FAssetRegistryTagsContext Context) const override;
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
