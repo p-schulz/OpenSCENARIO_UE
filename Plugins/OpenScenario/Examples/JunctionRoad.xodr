@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Small test network: road 0 (100 m) leads into junction 100. Connecting road 2 turns left
+     (r = 20 m) onto road 3, connecting road 4 goes straight onto road 5. -->
+<OpenDRIVE>
+  <header revMajor="1" revMinor="6" name="JunctionRoad" version="1.0" date="2025-01-01T00:00:00" north="0" south="0" east="0" west="0" vendor="OpenSCENARIO_UE" />
+
+  <road name="Approach" length="100.0" id="0" junction="-1">
+    <link>
+      <successor elementType="junction" elementId="100" />
+    </link>
+    <planView>
+      <geometry s="0.0" x="0.0" y="0.0" hdg="0.0" length="100.0"><line /></geometry>
+    </planView>
+    <elevationProfile><elevation s="0.0" a="0.0" b="0.0" c="0.0" d="0.0" /></elevationProfile>
+    <lanes>
+      <laneSection s="0.0">
+        <left>
+          <lane id="1" type="driving" level="false"><width sOffset="0.0" a="3.5" b="0.0" c="0.0" d="0.0" /></lane>
+        </left>
+        <center><lane id="0" type="none" level="false" /></center>
+        <right>
+          <lane id="-1" type="driving" level="false"><width sOffset="0.0" a="3.5" b="0.0" c="0.0" d="0.0" /></lane>
+          <lane id="-2" type="driving" level="false"><width sOffset="0.0" a="3.5" b="0.0" c="0.0" d="0.0" /></lane>
+        </right>
+      </laneSection>
+    </lanes>
+  </road>
+
+  <road name="LeftTurn" length="31.4159265" id="2" junction="100">
+    <link>
+      <predecessor elementType="road" elementId="0" contactPoint="end" />
+      <successor elementType="road" elementId="3" contactPoint="start" />
+    </link>
+    <planView>
+      <geometry s="0.0" x="100.0" y="0.0" hdg="0.0" length="31.4159265"><arc curvature="0.05" /></geometry>
+    </planView>
+    <lanes>
+      <laneSection s="0.0">
+        <left><lane id="1" type="driving" level="false"><link><predecessor id="1" /><successor id="1" /></link><width sOffset="0.0" a="3.5" b="0.0" c="0.0" d="0.0" /></lane></left>
+        <center><lane id="0" type="none" level="false" /></center>
+        <right><lane id="-1" type="driving" level="false"><link><predecessor id="-1" /><successor id="-1" /></link><width sOffset="0.0" a="3.5" b="0.0" c="0.0" d="0.0" /></lane></right>
+      </laneSection>
+    </lanes>
+  </road>
+
+  <road name="ExitLeft" length="100.0" id="3" junction="-1">
+    <link>
+      <predecessor elementType="junction" elementId="100" />
+    </link>
+    <planView>
+      <geometry s="0.0" x="120.0" y="20.0" hdg="1.5707963268" length="100.0"><line /></geometry>
+    </planView>
+    <lanes>
+      <laneSection s="0.0">
+        <left><lane id="1" type="driving" level="false"><link><predecessor id="1" /></link><width sOffset="0.0" a="3.5" b="0.0" c="0.0" d="0.0" /></lane></left>
+        <center><lane id="0" type="none" level="false" /></center>
+        <right><lane id="-1" type="driving" level="false"><link><predecessor id="-1" /></link><width sOffset="0.0" a="3.5" b="0.0" c="0.0" d="0.0" /></lane></right>
+      </laneSection>
+    </lanes>
+  </road>
+
+  <road name="Straight" length="20.0" id="4" junction="100">
+    <link>
+      <predecessor elementType="road" elementId="0" contactPoint="end" />
+      <successor elementType="road" elementId="5" contactPoint="start" />
+    </link>
+    <planView>
+      <geometry s="0.0" x="100.0" y="0.0" hdg="0.0" length="20.0"><line /></geometry>
+    </planView>
+    <lanes>
+      <laneSection s="0.0">
+        <left><lane id="1" type="driving" level="false"><link><predecessor id="1" /><successor id="1" /></link><width sOffset="0.0" a="3.5" b="0.0" c="0.0" d="0.0" /></lane></left>
+        <center><lane id="0" type="none" level="false" /></center>
+        <right><lane id="-1" type="driving" level="false"><link><predecessor id="-1" /><successor id="-1" /></link><width sOffset="0.0" a="3.5" b="0.0" c="0.0" d="0.0" /></lane></right>
+      </laneSection>
+    </lanes>
+  </road>
+
+  <road name="ExitStraight" length="100.0" id="5" junction="-1">
+    <link>
+      <predecessor elementType="junction" elementId="100" />
+    </link>
+    <planView>
+      <geometry s="0.0" x="120.0" y="0.0" hdg="0.0" length="100.0"><line /></geometry>
+    </planView>
+    <lanes>
+      <laneSection s="0.0">
+        <left><lane id="1" type="driving" level="false"><link><predecessor id="1" /></link><width sOffset="0.0" a="3.5" b="0.0" c="0.0" d="0.0" /></lane></left>
+        <center><lane id="0" type="none" level="false" /></center>
+        <right><lane id="-1" type="driving" level="false"><link><predecessor id="-1" /></link><width sOffset="0.0" a="3.5" b="0.0" c="0.0" d="0.0" /></lane></right>
+      </laneSection>
+    </lanes>
+  </road>
+
+  <junction id="100" name="Crossing" type="default">
+    <connection id="0" incomingRoad="0" connectingRoad="2" contactPoint="start"><laneLink from="-1" to="-1" /></connection>
+    <connection id="1" incomingRoad="0" connectingRoad="4" contactPoint="start"><laneLink from="-1" to="-1" /></connection>
+  </junction>
+</OpenDRIVE>

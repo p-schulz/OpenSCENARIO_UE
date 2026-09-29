@@ -1,0 +1,30 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "0.1.0",
+	"FriendlyName": "OpenSCENARIO",
+	"Description": "Create, import and simulate ASAM OpenSCENARIO (XOSC) files, including routing on referenced ASAM OpenDRIVE (XODR) road networks.",
+	"Category": "Simulation",
+	"CreatedBy": "OpenSCENARIO_UE",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"EngineVersion": "5.6.0",
+	"CanContainContent": false,
+	"IsBetaVersion": true,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "OpenScenario",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "OpenScenarioEditor",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
+		}
+	]
+}

@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Ego drives along road 0, is routed through the junction onto road 3 (left turn).
+     A target vehicle in front slows down; the target changes lane after 4 s. -->
+<OpenSCENARIO>
+  <FileHeader revMajor="1" revMinor="1" date="2025-01-01T00:00:00" description="Junction routing example" author="OpenSCENARIO_UE" />
+  <ParameterDeclarations>
+    <ParameterDeclaration name="EgoSpeed" parameterType="double" value="10.0" />
+    <ParameterDeclaration name="TargetStartS" parameterType="double" value="60.0" />
+    <ParameterDeclaration name="TargetSpeed" parameterType="double" value="${$EgoSpeed / 2}" />
+  </ParameterDeclarations>
+  <CatalogLocations />
+  <RoadNetwork>
+    <LogicFile filepath="JunctionRoad.xodr" />
+  </RoadNetwork>
+  <Entities>
+    <ScenarioObject name="Ego">
+      <Vehicle name="EgoCar" vehicleCategory="car">
+        <BoundingBox><Center x="1.4" y="0.0" z="0.75" /><Dimensions width="1.8" length="4.5" height="1.5" /></BoundingBox>
+        <Performance maxSpeed="60" maxAcceleration="10" maxDeceleration="10" />
+      </Vehicle>
+    </ScenarioObject>
+    <ScenarioObject name="Target">
+      <Vehicle name="TargetCar" vehicleCategory="car">
+        <BoundingBox><Center x="1.4" y="0.0" z="0.75" /><Dimensions width="1.8" length="4.5" height="1.5" /></BoundingBox>
+        <Performance maxSpeed="60" maxAcceleration="10" maxDeceleration="10" />
+      </Vehicle>
+    </ScenarioObject>
+  </Entities>
+  <Storyboard>
+    <Init>
+      <Actions>
+        <Private entityRef="Ego">
+          <PrivateAction><TeleportAction><Position><LanePosition roadId="0" laneId="-1" s="5.0" offset="0.0" /></Position></TeleportAction></PrivateAction>
+          <PrivateAction>
+            <LongitudinalAction><SpeedAction>
+              <SpeedActionDynamics dynamicsShape="step" value="0" dynamicsDimension="time" />
+              <SpeedActionTarget><AbsoluteTargetSpeed value="$EgoSpeed" /></SpeedActionTarget>
+            </SpeedAction></LongitudinalAction>
+          </PrivateAction>
+          <PrivateAction>
+            <RoutingAction><AssignRouteAction>
+              <Route name="LeftTurnRoute" closed="false">
+                <Waypoint routeStrategy="shortest"><Position><LanePosition roadId="0" laneId="-1" s="10.0" offset="0.0" /></Position></Waypoint>
+                <Waypoint routeStrategy="shortest"><Position><LanePosition roadId="3" laneId="-1" s="50.0" offset="0.0" /></Position></Waypoint>
+              </Route>
+            </AssignRouteAction></RoutingAction>
+          </PrivateAction>
+        </Private>
+        <Private entityRef="Target">
+          <PrivateAction><TeleportAction><Position><LanePosition roadId="0" laneId="-1" s="$TargetStartS" offset="0.0" /></Position></TeleportAction></PrivateAction>
+          <PrivateAction>
+            <LongitudinalAction><SpeedAction>
+              <SpeedActionDynamics dynamicsShape="step" value="0" dynamicsDimension="time" />
+              <SpeedActionTarget><AbsoluteTargetSpeed value="$TargetSpeed" /></SpeedActionTarget>
+            </SpeedAction></LongitudinalAction>
+          </PrivateAction>
+        </Private>
+      </Actions>
+    </Init>
+    <Story name="MainStory">
+      <Act name="MainAct">
+        <ManeuverGroup maximumExecutionCount="1" name="TargetGroup">
+          <Actors selectTriggeringEntities="false"><EntityRef entityRef="Target" /></Actors>
+          <Maneuver name="TargetManeuver">
+            <Event name="TargetChangesLane" priority="overwrite" maximumExecutionCount="1">
+              <Action name="ChangeLane">
+                <PrivateAction><LateralAction><LaneChangeAction>
+                  <LaneChangeActionDynamics dynamicsShape="sinusoidal" value="3.0" dynamicsDimension="time" />
+                  <LaneChangeTarget><AbsoluteTargetLane value="-2" /></LaneChangeTarget>
+                </LaneChangeAction></LateralAction></PrivateAction>
+              </Action>
+              <StartTrigger><ConditionGroup>
+                <Condition name="After4s" delay="0" conditionEdge="rising">
+                  <ByValueCondition><SimulationTimeCondition value="4.0" rule="greaterThan" /></ByValueCondition>
+                </Condition>
+              </ConditionGroup></StartTrigger>
+            </Event>
+          </Maneuver>
+        </ManeuverGroup>
+        <ManeuverGroup maximumExecutionCount="1" name="EgoGroup">
+          <Actors selectTriggeringEntities="false"><EntityRef entityRef="Ego" /></Actors>
+          <Maneuver name="EgoManeuver">
+            <Event name="EgoSlowsDown" priority="overwrite" maximumExecutionCount="1">
+              <Action name="Slow">
+                <PrivateAction><LongitudinalAction><SpeedAction>
+                  <SpeedActionDynamics dynamicsShape="linear" value="2.0" dynamicsDimension="rate" />
+                  <SpeedActionTarget><AbsoluteTargetSpeed value="5.0" /></SpeedActionTarget>
+                </SpeedAction></LongitudinalAction></PrivateAction>
+              </Action>
+              <StartTrigger><ConditionGroup>
+                <Condition name="Close" delay="0" conditionEdge="rising">
+                  <ByEntityCondition>
+                    <TriggeringEntities triggeringEntitiesRule="any"><EntityRef entityRef="Ego" /></TriggeringEntities>
+                    <EntityCondition><RelativeDistanceCondition entityRef="Target" relativeDistanceType="euclidianDistance" value="30.0" freespace="false" rule="lessThan" /></EntityCondition>
+                  </ByEntityCondition>
+                </Condition>
+              </ConditionGroup></StartTrigger>
+            </Event>
+          </Maneuver>
+        </ManeuverGroup>
+        <StartTrigger><ConditionGroup>
+          <Condition name="Start" delay="0" conditionEdge="rising">
+            <ByValueCondition><SimulationTimeCondition value="0" rule="greaterOrEqual" /></ByValueCondition>
+          </Condition>
+        </ConditionGroup></StartTrigger>
+      </Act>
+    </Story>
+    <StopTrigger><ConditionGroup>
+      <Condition name="EgoReachedExit" delay="0" conditionEdge="rising">
+        <ByEntityCondition>
+          <TriggeringEntities triggeringEntitiesRule="any"><EntityRef entityRef="Ego" /></TriggeringEntities>
+          <EntityCondition><ReachPositionCondition tolerance="3.0"><Position><LanePosition roadId="3" laneId="-1" s="50.0" offset="0.0" /></Position></ReachPositionCondition></EntityCondition>
+        </ByEntityCondition>
+      </Condition>
+    </ConditionGroup></StopTrigger>
+  </Storyboard>
+</OpenSCENARIO>
