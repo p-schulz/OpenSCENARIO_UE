@@ -39,6 +39,7 @@ void AOpenScenarioActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		Runner->Stop(true);
 		Runner = nullptr;
 	}
+	PlaybackState = EOpenScenarioPlaybackState::Stopped;
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -61,6 +62,7 @@ bool AOpenScenarioActor::StartScenario()
 	Runner->DefaultPedestrianClass = PedestrianActorClass;
 	Runner->DefaultMiscObjectClass = MiscObjectActorClass;
 	Runner->EntityClassOverrides = EntityActorClasses;
+	Runner->Dynamics = Dynamics;
 	Runner->OnFinished.AddUObject(this, &AOpenScenarioActor::HandleFinished);
 	Runner->OnEntitySpawned.AddUObject(this, &AOpenScenarioActor::HandleEntitySpawned);
 
@@ -68,8 +70,98 @@ bool AOpenScenarioActor::StartScenario()
 	if (!Runner->Initialize(World, Scenario))
 	{
 		Runner = nullptr;
+		SetPlaybackState(EOpenScenarioPlaybackState::Stopped);
 		return false;
 	}
+	SetPlaybackState(bStartPaused ? EOpenScenarioPlaybackState::Paused : EOpenScenarioPlaybackState::Playing);
+	return true;
+}
+
+void AOpenScenarioActor::PlayScenario()
+{
+	switch (PlaybackState)
+	{
+	case EOpenScenarioPlaybackState::Paused:
+		SetPlaybackState(EOpenScenarioPlaybackState::Playing);
+		break;
+	case EOpenScenarioPlaybackState::Playing:
+		break;
+	default:
+	{
+		const bool bWasPaused = bStartPaused;
+		bStartPaused = false;
+		StartScenario();
+		bStartPaused = bWasPaused;
+		break;
+	}
+	}
+}
+
+void AOpenScenarioActor::PauseScenario()
+{
+	if (PlaybackState == EOpenScenarioPlaybackState::Playing)
+	{
+		SetPlaybackState(EOpenScenarioPlaybackState::Paused);
+	}
+}
+
+void AOpenScenarioActor::StepScenario()
+{
+	if (PlaybackState == EOpenScenarioPlaybackState::Stopped || PlaybackState == EOpenScenarioPlaybackState::Finished)
+	{
+		// Stepping from a stopped scenario starts it paused on its first step.
+		const bool bWasPaused = bStartPaused;
+		bStartPaused = true;
+		const bool bStarted = StartScenario();
+		bStartPaused = bWasPaused;
+		if (!bStarted)
+		{
+			return;
+		}
+	}
+	if (PlaybackState == EOpenScenarioPlaybackState::Paused && Runner && Runner->IsRunning())
+	{
+		Runner->Step(FMath::Max(0.001, static_cast<double>(FixedTimeStep)));
+	}
+}
+
+bool AOpenScenarioActor::RestartScenario()
+{
+	StopScenario();
+	return StartScenario();
+}
+
+void AOpenScenarioActor::SetTimeScale(float NewTimeScale)
+{
+	TimeScale = FMath::Max(0.f, NewTimeScale);
+}
+
+bool AOpenScenarioActor::ShouldTickIfViewportsOnly() const
+{
+	const UWorld* World = GetWorld();
+	return PlaybackState == EOpenScenarioPlaybackState::Playing && World && !World->IsGameWorld();
+}
+
+void AOpenScenarioActor::SetPlaybackState(EOpenScenarioPlaybackState NewState)
+{
+	if (PlaybackState != NewState)
+	{
+		PlaybackState = NewState;
+		OnPlaybackStateChanged.Broadcast(NewState);
+	}
+}
+
+bool AOpenScenarioActor::GetEntityDynamics(const FString& EntityName, double& OutSpeed, double& OutDesiredSpeed, double& OutLeaderGap, FString& OutLeaderName) const
+{
+	const FOSCEntityState* State = Runner ? Runner->GetEntityState(EntityName) : nullptr;
+	if (!State)
+	{
+		return false;
+	}
+	OutSpeed = State->Speed;
+	OutDesiredSpeed = State->DesiredSpeed;
+	OutLeaderGap = State->LeaderGap;
+	OutLeaderName = State->LeaderName;
 	return true;
 }
 
@@ -82,11 +174,12 @@ void AOpenScenarioActor::StopScenario()
 		Runner->Stop(true);
 		Runner = nullptr;
 	}
+	SetPlaybackState(EOpenScenarioPlaybackState::Stopped);
 }
 
 bool AOpenScenarioActor::IsScenarioRunning() const
 {
-	return Runner && Runner->IsRunning();
+	return PlaybackState == EOpenScenarioPlaybackState::Playing || PlaybackState == EOpenScenarioPlaybackState::Paused;
 }
 
 double AOpenScenarioActor::GetSimulationTime() const
@@ -108,7 +201,7 @@ double AOpenScenarioActor::GetEntitySpeed(const FString& EntityName) const
 void AOpenScenarioActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
-	if (!Runner || !Runner->IsRunning())
+	if (PlaybackState != EOpenScenarioPlaybackState::Playing || !Runner || !Runner->IsRunning())
 	{
 		return;
 	}
@@ -133,6 +226,7 @@ void AOpenScenarioActor::HandleFinished()
 	{
 		Runner->Stop(true);
 	}
+	SetPlaybackState(EOpenScenarioPlaybackState::Finished);
 	OnScenarioFinished.Broadcast();
 }
 

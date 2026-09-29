@@ -1,5 +1,6 @@
 #include "Authoring/SOpenScenarioStoryboardTab.h"
 #include "Authoring/OpenScenarioEditorContext.h"
+#include "Authoring/SOpenScenarioTransportBar.h"
 #include "Scenario/OpenScenarioAsset.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "IDetailsView.h"
@@ -109,6 +110,11 @@ void SOpenScenarioStoryboardTab::Construct(const FArguments& InArgs, FOpenScenar
 	ChildSlot
 	[
 		SNew(SVerticalBox)
+
+		+ SVerticalBox::Slot().AutoHeight().Padding(4.f)
+		[
+			SNew(SOpenScenarioTransportBar, InContext)
+		]
 
 		+ SVerticalBox::Slot().AutoHeight().Padding(4.f)
 		[

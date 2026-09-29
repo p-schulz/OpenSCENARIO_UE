@@ -352,6 +352,8 @@ void FOpenScenarioParser::ParseEntityNode(const FXmlNode* Node, FOSCEntity& E)
 	if (const FXmlNode* Perf = OSCXml::Child(Node, TEXT("Performance")))
 	{
 		E.MaxSpeed = AttrD(Perf, TEXT("maxSpeed"), E.MaxSpeed);
+		E.MaxAcceleration = AttrD(Perf, TEXT("maxAcceleration"), E.MaxAcceleration);
+		E.MaxDeceleration = AttrD(Perf, TEXT("maxDeceleration"), E.MaxDeceleration);
 	}
 }
 

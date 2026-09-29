@@ -5,6 +5,7 @@
 #include "Scenario/OpenScenarioAsset.h"
 #include "Scenario/OpenScenarioWriter.h"
 #include "Simulation/OpenScenarioActor.h"
+#include "Simulation/OpenScenarioRunner.h"
 #include "AssetToolsModule.h"
 #include "AssetImportTask.h"
 #include "DesktopPlatformModule.h"
@@ -267,6 +268,144 @@ AActor* FOpenScenarioEditorContext::PlaceScenarioActor()
 		OnVisualizationChanged.Broadcast();
 	}
 	return Actor;
+}
+
+// ------------------------------------------------------------------------------------------------
+// Playback
+// ------------------------------------------------------------------------------------------------
+
+AOpenScenarioActor* FOpenScenarioEditorContext::FindPlaybackActor() const
+{
+	UOpenScenarioAsset* A = Asset.Get();
+	if (!A || !GEditor)
+	{
+		return nullptr;
+	}
+	auto Search = [A](UWorld* World) -> AOpenScenarioActor*
+	{
+		if (World)
+		{
+			for (TActorIterator<AOpenScenarioActor> It(World); It; ++It)
+			{
+				if (It->Scenario == A)
+				{
+					return *It;
+				}
+			}
+		}
+		return nullptr;
+	};
+	// A running Play-In-Editor session takes precedence over the editor world.
+	if (AOpenScenarioActor* InPie = Search(GEditor->PlayWorld))
+	{
+		return InPie;
+	}
+	return Search(GEditor->GetEditorWorldContext().World());
+}
+
+void FOpenScenarioEditorContext::RefreshPlaybackCache() const
+{
+	if (PlaybackCacheFrame == GFrameCounter)
+	{
+		return;
+	}
+	PlaybackCacheFrame = GFrameCounter;
+	const AOpenScenarioActor* Actor = FindPlaybackActor();
+	bCachedHasActor = Actor != nullptr;
+	CachedPlaybackState = Actor ? Actor->GetPlaybackState() : EOpenScenarioPlaybackState::Stopped;
+	CachedPlaybackTime = Actor ? Actor->GetSimulationTime() : 0.0;
+	CachedTimeScale = Actor ? Actor->TimeScale : 1.f;
+}
+
+EOpenScenarioPlaybackState FOpenScenarioEditorContext::GetPlaybackState() const { RefreshPlaybackCache(); return CachedPlaybackState; }
+double FOpenScenarioEditorContext::GetPlaybackTime() const { RefreshPlaybackCache(); return CachedPlaybackTime; }
+bool FOpenScenarioEditorContext::HasPlaybackActor() const { RefreshPlaybackCache(); return bCachedHasActor; }
+float FOpenScenarioEditorContext::GetPlaybackTimeScale() const { RefreshPlaybackCache(); return CachedTimeScale; }
+
+void FOpenScenarioEditorContext::SetPlaybackTimeScale(float Scale)
+{
+	if (AOpenScenarioActor* Actor = FindPlaybackActor())
+	{
+		Actor->SetTimeScale(Scale);
+	}
+	PlaybackCacheFrame = MAX_uint64;
+}
+
+bool FOpenScenarioEditorContext::PrepareForPlayback()
+{
+	// The simulation reads the asset, so unapplied storyboard edits have to be written first.
+	return !bDirty || Apply(true);
+}
+
+void FOpenScenarioEditorContext::PlaybackPlay()
+{
+	if (!Asset.IsValid() || !PrepareForPlayback())
+	{
+		return;
+	}
+	AOpenScenarioActor* Actor = FindPlaybackActor();
+	if (!Actor)
+	{
+		Actor = Cast<AOpenScenarioActor>(PlaceScenarioActor());
+	}
+	if (Actor)
+	{
+		Actor->PlayScenario();
+	}
+	PlaybackCacheFrame = MAX_uint64;
+}
+
+void FOpenScenarioEditorContext::PlaybackPause()
+{
+	if (AOpenScenarioActor* Actor = FindPlaybackActor())
+	{
+		Actor->PauseScenario();
+	}
+	PlaybackCacheFrame = MAX_uint64;
+}
+
+void FOpenScenarioEditorContext::PlaybackStep()
+{
+	if (!Asset.IsValid() || !PrepareForPlayback())
+	{
+		return;
+	}
+	AOpenScenarioActor* Actor = FindPlaybackActor();
+	if (!Actor)
+	{
+		Actor = Cast<AOpenScenarioActor>(PlaceScenarioActor());
+	}
+	if (Actor)
+	{
+		Actor->StepScenario();
+	}
+	PlaybackCacheFrame = MAX_uint64;
+}
+
+void FOpenScenarioEditorContext::PlaybackStop()
+{
+	if (AOpenScenarioActor* Actor = FindPlaybackActor())
+	{
+		Actor->StopScenario();
+	}
+	PlaybackCacheFrame = MAX_uint64;
+}
+
+void FOpenScenarioEditorContext::PlaybackRestart()
+{
+	if (!Asset.IsValid() || !PrepareForPlayback())
+	{
+		return;
+	}
+	if (AOpenScenarioActor* Actor = FindPlaybackActor())
+	{
+		Actor->RestartScenario();
+	}
+	else
+	{
+		PlaybackPlay();
+	}
+	PlaybackCacheFrame = MAX_uint64;
 }
 
 // ------------------------------------------------------------------------------------------------

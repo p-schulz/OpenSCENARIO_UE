@@ -29,6 +29,7 @@ static double RunToEnd(const FString& Xml, const FString& SourceFile)
 	Asset->SetSource(Xml, SourceFile);
 	UOpenScenarioRunner* R = new UOpenScenarioRunner();
 	R->bSpawnActors = false;
+	R->Dynamics.Mode = EOpenScenarioDynamicsMode::Kinematic;
 	if (!R->Initialize(nullptr, Asset)) { return -1.0; }
 	for (int i = 0; i < 6000 && R->IsRunning(); ++i) { R->Step(0.02); }
 	return R->IsFinished() ? R->GetSimulationTime() : -2.0;

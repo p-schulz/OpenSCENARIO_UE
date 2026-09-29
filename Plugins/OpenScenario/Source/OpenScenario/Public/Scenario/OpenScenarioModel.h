@@ -106,6 +106,13 @@ struct FOSCEntity
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
 	double MaxSpeed = 70.0;
+
+	/** m/s^2. The simulation additionally caps this with the dynamics settings of the OpenScenario Actor. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+	double MaxAcceleration = 3.5;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+	double MaxDeceleration = 8.0;
 };
 
 // ------------------------------------------------------------------------------------------------

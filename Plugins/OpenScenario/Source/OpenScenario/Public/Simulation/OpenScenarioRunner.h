@@ -5,9 +5,30 @@
 #include "GameFramework/Actor.h"
 #include "OpenDrive/OpenDriveMap.h"
 #include "Scenario/OpenScenarioModel.h"
+#include "Simulation/OpenScenarioDynamics.h"
 #include "OpenScenarioRunner.generated.h"
 
 class UOpenScenarioAsset;
+
+/** One point of the path a vehicle is about to drive along (used for braking and traffic checks). */
+struct FLookAheadSample
+{
+	/** Distance from the start of the path (m). */
+	double Dist = 0.0;
+	/** Fastest allowed speed at this point (speed limit, curve); negative = unlimited. */
+	double VLimit = -1.0;
+	double X = 0.0;
+	double Y = 0.0;
+};
+
+struct FLookAheadCache
+{
+	bool bValid = false;
+	double TravelledAtBuild = 0.0;
+	double TimeBuilt = 0.0;
+	double CoveredDistance = 0.0;
+	TArray<FLookAheadSample> Samples;
+};
 
 /** Kinematic state of one scenario entity. Units: metres, radians, seconds (OpenSCENARIO frame). */
 struct OPENSCENARIO_API FOSCEntityState
@@ -17,7 +38,11 @@ struct OPENSCENARIO_API FOSCEntityState
 
 	double X = 0.0, Y = 0.0, Z = 0.0, Heading = 0.0;
 	double Speed = 0.0;
+	/** Speed the scenario asks for. Equals Speed in kinematic mode; in simple dynamics Speed follows it. */
+	double DesiredSpeed = 0.0;
 	double Accel = 0.0;
+	/** Last acceleration command of the simple dynamics (for jerk limiting). */
+	double CmdAccel = 0.0;
 	double TravelledDistance = 0.0;
 
 	// Road binding (valid if bOnRoad)
@@ -39,6 +64,14 @@ struct OPENSCENARIO_API FOSCEntityState
 	// Route (road-level), see AssignRouteAction
 	TArray<FOpenDriveRouteStep> Route;
 	int32 RouteIndex = 0;
+
+	// Simple dynamics (diagnostics)
+	/** True while limits, curves or traffic keep the vehicle below its desired speed. */
+	bool bSpeedConstrained = false;
+	/** Bumper-to-bumper distance to the actor in front, negative if none. */
+	double LeaderGap = -1.0;
+	FString LeaderName;
+	FLookAheadCache LookAhead;
 
 	/** True while a trajectory action drives the pose directly. */
 	bool bTrajectoryControlled = false;
@@ -94,6 +127,9 @@ public:
 	TSubclassOf<AActor> DefaultMiscObjectClass;
 	UPROPERTY()
 	TMap<FString, TSubclassOf<AActor>> EntityClassOverrides;
+
+	/** Vehicle/driver model parameters. */
+	FOpenScenarioDynamicsSettings Dynamics;
 
 	// --- Lifecycle ---------------------------------------------------------------------------
 	bool Initialize(UWorld* InWorld, UOpenScenarioAsset* InAsset);
@@ -152,6 +188,23 @@ private:
 	void UpdateTrajectoryInstance(FOSCActionInstance& Inst, FOSCEntityState& E, double Dt);
 	void AssignRoute(const FOSCAction& Action, FOSCEntityState& E);
 	void EndLaneChange(FOSCEntityState& E, bool bToTarget);
+	/** Sets the speed a SpeedAction asks for (directly, or as desired speed under simple dynamics). */
+	void SetCommandedSpeed(FOSCEntityState& E, double Speed) const;
+	bool UsesSimpleDynamics(const FOSCEntityState& E) const;
+
+	// Simple vehicle dynamics
+	struct FRoadCursor
+	{
+		FString RoadId;
+		double S = 0.0;
+		int32 LaneId = 0;
+		bool bForward = true;
+		int32 RouteIndex = 0;
+	};
+	void UpdateDynamics(FOSCEntityState& E, double Dt);
+	void BuildLookAhead(FOSCEntityState& E, double Distance);
+	bool AdvanceCursor(FRoadCursor& Cursor, const TArray<FOpenDriveRouteStep>& Route, double Ds) const;
+	bool FindLeader(const FOSCEntityState& E, double LookDistance, double& OutGap, double& OutLeaderSpeed, FString& OutName) const;
 
 	// Positions & motion
 	FOSCEntityState* FindEntity(const FString& Name);
@@ -184,6 +237,7 @@ private:
 	TArray<FOSCActionInstance> Instances;
 	TMap<FString, FOSCRuntime*> ElementIndex;
 
+	bool bInitPhase = false;
 	double SimTime = 0.0;
 	double CurrentDt = 0.0;
 	int64 Tick = 0;

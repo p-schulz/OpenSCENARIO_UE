@@ -2,12 +2,24 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Simulation/OpenScenarioDynamics.h"
 #include "OpenScenarioActor.generated.h"
 
 class UOpenScenarioAsset;
 class UOpenScenarioRunner;
 
+UENUM(BlueprintType)
+enum class EOpenScenarioPlaybackState : uint8
+{
+	Stopped,
+	Playing,
+	Paused,
+	/** The storyboard ended (stop trigger or all stories complete); entity actors are still in the level. */
+	Finished
+};
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOpenScenarioFinishedSignature);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOpenScenarioPlaybackStateSignature, EOpenScenarioPlaybackState, NewState);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOpenScenarioEntitySpawnedSignature, const FString&, EntityName, AActor*, EntityActor);
 
 /**
@@ -38,6 +50,14 @@ public:
 	/** For scenarios without a StopTrigger: end when all acts are complete. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OpenSCENARIO")
 	bool bStopWhenStoryboardComplete = true;
+
+	/** Start in the paused state (use PlayScenario or StepScenario to continue). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OpenSCENARIO")
+	bool bStartPaused = false;
+
+	/** Vehicle/driver model: acceleration limits, speed limits, curves and traffic. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OpenSCENARIO|Dynamics")
+	FOpenScenarioDynamicsSettings Dynamics;
 
 	/** Fixed simulation step in seconds. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OpenSCENARIO|Simulation", meta = (ClampMin = "0.001", ClampMax = "0.5"))
@@ -73,12 +93,38 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "OpenSCENARIO")
 	FOpenScenarioEntitySpawnedSignature OnEntitySpawned;
 
-	UFUNCTION(BlueprintCallable, CallInEditor, Category = "OpenSCENARIO")
+	UPROPERTY(BlueprintAssignable, Category = "OpenSCENARIO")
+	FOpenScenarioPlaybackStateSignature OnPlaybackStateChanged;
+
+	/** Starts the scenario from the beginning (entity actors are respawned). */
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "OpenSCENARIO|Playback")
 	bool StartScenario();
 
-	UFUNCTION(BlueprintCallable, CallInEditor, Category = "OpenSCENARIO")
+	/** Starts the scenario if it is stopped or finished, resumes it if it is paused. */
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "OpenSCENARIO|Playback")
+	void PlayScenario();
+
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "OpenSCENARIO|Playback")
+	void PauseScenario();
+
+	/** Advances a paused scenario by one fixed time step. */
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "OpenSCENARIO|Playback")
+	void StepScenario();
+
+	/** Stops the scenario and removes the entity actors. */
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "OpenSCENARIO|Playback")
 	void StopScenario();
 
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "OpenSCENARIO|Playback")
+	bool RestartScenario();
+
+	UFUNCTION(BlueprintPure, Category = "OpenSCENARIO|Playback")
+	EOpenScenarioPlaybackState GetPlaybackState() const { return PlaybackState; }
+
+	UFUNCTION(BlueprintCallable, Category = "OpenSCENARIO|Playback")
+	void SetTimeScale(float NewTimeScale);
+
+	/** True while the scenario is playing or paused. */
 	UFUNCTION(BlueprintPure, Category = "OpenSCENARIO")
 	bool IsScenarioRunning() const;
 
@@ -91,6 +137,10 @@ public:
 	/** Speed of a scenario entity in m/s (0 if unknown). */
 	UFUNCTION(BlueprintPure, Category = "OpenSCENARIO")
 	double GetEntitySpeed(const FString& EntityName) const;
+
+	/** Diagnostics of the vehicle model for one entity. Returns false for unknown entities. */
+	UFUNCTION(BlueprintPure, Category = "OpenSCENARIO|Dynamics")
+	bool GetEntityDynamics(const FString& EntityName, double& OutSpeed, double& OutDesiredSpeed, double& OutLeaderGap, FString& OutLeaderName) const;
 
 	/** Draws the road network of the scenario's OpenDRIVE file as persistent debug lines. */
 	UFUNCTION(BlueprintCallable, CallInEditor, Category = "OpenSCENARIO|Debug")
@@ -106,13 +156,19 @@ public:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void Tick(float DeltaSeconds) override;
+	/** Lets a scenario play in the editor viewport without Play-In-Editor. */
+	virtual bool ShouldTickIfViewportsOnly() const override;
 
 private:
 	void HandleFinished();
 	void HandleEntitySpawned(const FString& Name, AActor* Actor);
 
+	void SetPlaybackState(EOpenScenarioPlaybackState NewState);
+
 	UPROPERTY(Transient)
 	TObjectPtr<UOpenScenarioRunner> Runner;
+
+	EOpenScenarioPlaybackState PlaybackState = EOpenScenarioPlaybackState::Stopped;
 
 	double Accumulator = 0.0;
 };

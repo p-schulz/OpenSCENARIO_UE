@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A slow vehicle appears in front of the Ego at t = 6 s; the Ego brakes and follows it -->
+<OpenSCENARIO>
+  <FileHeader revMajor="1" revMinor="1" date="2025-01-01T00:00:00" description="A slow vehicle appears in front of the Ego at t = 6 s; the Ego brakes and follows it" author="OpenSCENARIO_UE" />
+  <ParameterDeclarations />
+  <CatalogLocations />
+  <RoadNetwork>
+    <LogicFile filepath="CurvyRoad.xodr" />
+  </RoadNetwork>
+  <Entities>
+    <ScenarioObject name="Ego">
+      <Vehicle name="EgoCar" vehicleCategory="car">
+        <BoundingBox><Center x="1.4" y="0.0" z="0.75" /><Dimensions width="1.8" length="4.5" height="1.5" /></BoundingBox>
+        <Performance maxSpeed="60" maxAcceleration="3.5" maxDeceleration="8" />
+      </Vehicle>
+    </ScenarioObject>
+    <ScenarioObject name="Leader">
+      <Vehicle name="LeaderCar" vehicleCategory="car">
+        <BoundingBox><Center x="1.4" y="0.0" z="0.75" /><Dimensions width="1.8" length="4.5" height="1.5" /></BoundingBox>
+        <Performance maxSpeed="60" maxAcceleration="3.5" maxDeceleration="8" />
+      </Vehicle>
+    </ScenarioObject>
+  </Entities>
+  <Storyboard>
+    <Init>
+      <Actions>
+        <Private entityRef="Ego">
+          <PrivateAction><TeleportAction><Position><LanePosition roadId="1" laneId="-1" s="5.0" offset="0.0" /></Position></TeleportAction></PrivateAction>
+          <PrivateAction>
+            <LongitudinalAction><SpeedAction>
+              <SpeedActionDynamics dynamicsShape="step" value="0" dynamicsDimension="time" />
+              <SpeedActionTarget><AbsoluteTargetSpeed value="0" /></SpeedActionTarget>
+            </SpeedAction></LongitudinalAction>
+          </PrivateAction>
+        </Private>
+        <Private entityRef="Leader">
+          <PrivateAction><TeleportAction><Position><WorldPosition x="-500" y="0" z="0" h="0" /></Position></TeleportAction></PrivateAction>
+        </Private>
+      </Actions>
+    </Init>
+    <Story name="MainStory">
+      <Act name="MainAct">
+        <ManeuverGroup maximumExecutionCount="1" name="EgoGroup">
+          <Actors selectTriggeringEntities="false"><EntityRef entityRef="Ego" /></Actors>
+          <Maneuver name="EgoDrives">
+            <Event name="FloorIt" priority="overwrite" maximumExecutionCount="1">
+              <Action name="Go">
+                <PrivateAction><LongitudinalAction><SpeedAction>
+                  <SpeedActionDynamics dynamicsShape="step" value="0" dynamicsDimension="time" />
+                  <SpeedActionTarget><AbsoluteTargetSpeed value="30.0" /></SpeedActionTarget>
+                </SpeedAction></LongitudinalAction></PrivateAction>
+              </Action>
+              <StartTrigger><ConditionGroup>
+                <Condition name="Now" delay="0" conditionEdge="rising">
+                  <ByValueCondition><SimulationTimeCondition value="0" rule="greaterOrEqual" /></ByValueCondition>
+                </Condition>
+              </ConditionGroup></StartTrigger>
+            </Event>
+          </Maneuver>
+        </ManeuverGroup>
+        <ManeuverGroup maximumExecutionCount="1" name="LeaderGroup">
+          <Actors selectTriggeringEntities="false"><EntityRef entityRef="Leader" /></Actors>
+          <Maneuver name="LeaderAppears">
+            <Event name="AppearInFront" priority="overwrite" maximumExecutionCount="1">
+              <Action name="Appear">
+                <PrivateAction><TeleportAction><Position><LanePosition roadId="1" laneId="-1" s="110.0" offset="0.0" /></Position></TeleportAction></PrivateAction>
+              </Action>
+              <Action name="Crawl">
+                <PrivateAction><LongitudinalAction><SpeedAction>
+                  <SpeedActionDynamics dynamicsShape="step" value="0" dynamicsDimension="time" />
+                  <SpeedActionTarget><AbsoluteTargetSpeed value="3.0" /></SpeedActionTarget>
+                </SpeedAction></LongitudinalAction></PrivateAction>
+              </Action>
+              <StartTrigger><ConditionGroup>
+                <Condition name="After6s" delay="0" conditionEdge="rising">
+                  <ByValueCondition><SimulationTimeCondition value="6.0" rule="greaterThan" /></ByValueCondition>
+                </Condition>
+              </ConditionGroup></StartTrigger>
+            </Event>
+          </Maneuver>
+        </ManeuverGroup>
+        <StartTrigger><ConditionGroup>
+          <Condition name="Start" delay="0" conditionEdge="rising">
+            <ByValueCondition><SimulationTimeCondition value="0" rule="greaterOrEqual" /></ByValueCondition>
+          </Condition>
+        </ConditionGroup></StartTrigger>
+      </Act>
+    </Story>
+    <StopTrigger><ConditionGroup>
+      <Condition name="Timeout" delay="0" conditionEdge="rising">
+        <ByValueCondition><SimulationTimeCondition value="45.0" rule="greaterThan" /></ByValueCondition>
+      </Condition>
+    </ConditionGroup></StopTrigger>
+  </Storyboard>
+</OpenSCENARIO>

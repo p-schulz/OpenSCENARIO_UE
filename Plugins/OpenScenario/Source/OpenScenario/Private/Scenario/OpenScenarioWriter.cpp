@@ -476,7 +476,7 @@ namespace
 			}
 			X.Open(TEXT("Vehicle"), A);
 			WriteBoundingBox(X, E);
-			X.Leaf(TEXT("Performance"), FAttrs().D(TEXT("maxSpeed"), E.MaxSpeed).D(TEXT("maxAcceleration"), 10.0).D(TEXT("maxDeceleration"), 10.0));
+			X.Leaf(TEXT("Performance"), FAttrs().D(TEXT("maxSpeed"), E.MaxSpeed).D(TEXT("maxAcceleration"), E.MaxAcceleration).D(TEXT("maxDeceleration"), E.MaxDeceleration));
 			// The schema requires axles; nominal passenger-car values are written since the model has none.
 			X.Open(TEXT("Axles"));
 			X.Leaf(TEXT("FrontAxle"), FAttrs().D(TEXT("maxSteering"), 0.5).D(TEXT("wheelDiameter"), 0.8).D(TEXT("trackWidth"), 1.68).D(TEXT("positionX"), 2.98).D(TEXT("positionZ"), 0.4));

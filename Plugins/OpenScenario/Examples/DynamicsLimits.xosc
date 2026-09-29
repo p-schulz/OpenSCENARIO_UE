@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Ego asked for 30 m/s: obeys the 50 km/h limit, slows for the curve and the 30 km/h lane limit -->
+<OpenSCENARIO>
+  <FileHeader revMajor="1" revMinor="1" date="2025-01-01T00:00:00" description="Ego asked for 30 m/s: obeys the 50 km/h limit, slows for the curve and the 30 km/h lane limit" author="OpenSCENARIO_UE" />
+  <ParameterDeclarations />
+  <CatalogLocations />
+  <RoadNetwork>
+    <LogicFile filepath="CurvyRoad.xodr" />
+  </RoadNetwork>
+  <Entities>
+    <ScenarioObject name="Ego">
+      <Vehicle name="EgoCar" vehicleCategory="car">
+        <BoundingBox><Center x="1.4" y="0.0" z="0.75" /><Dimensions width="1.8" length="4.5" height="1.5" /></BoundingBox>
+        <Performance maxSpeed="60" maxAcceleration="3.5" maxDeceleration="8" />
+      </Vehicle>
+    </ScenarioObject>
+  </Entities>
+  <Storyboard>
+    <Init>
+      <Actions>
+        <Private entityRef="Ego">
+          <PrivateAction><TeleportAction><Position><LanePosition roadId="1" laneId="-1" s="5.0" offset="0.0" /></Position></TeleportAction></PrivateAction>
+          <PrivateAction>
+            <LongitudinalAction><SpeedAction>
+              <SpeedActionDynamics dynamicsShape="step" value="0" dynamicsDimension="time" />
+              <SpeedActionTarget><AbsoluteTargetSpeed value="0" /></SpeedActionTarget>
+            </SpeedAction></LongitudinalAction>
+          </PrivateAction>
+        </Private>
+      </Actions>
+    </Init>
+    <Story name="MainStory">
+      <Act name="MainAct">
+        <ManeuverGroup maximumExecutionCount="1" name="EgoGroup">
+          <Actors selectTriggeringEntities="false"><EntityRef entityRef="Ego" /></Actors>
+          <Maneuver name="EgoDrives">
+            <Event name="FloorIt" priority="overwrite" maximumExecutionCount="1">
+              <Action name="Go">
+                <PrivateAction><LongitudinalAction><SpeedAction>
+                  <SpeedActionDynamics dynamicsShape="step" value="0" dynamicsDimension="time" />
+                  <SpeedActionTarget><AbsoluteTargetSpeed value="30.0" /></SpeedActionTarget>
+                </SpeedAction></LongitudinalAction></PrivateAction>
+              </Action>
+              <StartTrigger><ConditionGroup>
+                <Condition name="Now" delay="0" conditionEdge="rising">
+                  <ByValueCondition><SimulationTimeCondition value="0" rule="greaterOrEqual" /></ByValueCondition>
+                </Condition>
+              </ConditionGroup></StartTrigger>
+            </Event>
+          </Maneuver>
+        </ManeuverGroup>
+        <StartTrigger><ConditionGroup>
+          <Condition name="Start" delay="0" conditionEdge="rising">
+            <ByValueCondition><SimulationTimeCondition value="0" rule="greaterOrEqual" /></ByValueCondition>
+          </Condition>
+        </ConditionGroup></StartTrigger>
+      </Act>
+    </Story>
+    <StopTrigger><ConditionGroup>
+      <Condition name="EgoReachedEnd" delay="0" conditionEdge="rising">
+        <ByEntityCondition>
+          <TriggeringEntities triggeringEntitiesRule="any"><EntityRef entityRef="Ego" /></TriggeringEntities>
+          <EntityCondition><ReachPositionCondition tolerance="3.0"><Position><LanePosition roadId="3" laneId="-1" s="120.0" offset="0.0" /></Position></ReachPositionCondition></EntityCondition>
+        </ByEntityCondition>
+      </Condition>
+    </ConditionGroup></StopTrigger>
+  </Storyboard>
+</OpenSCENARIO>

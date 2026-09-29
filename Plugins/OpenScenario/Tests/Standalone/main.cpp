@@ -26,6 +26,8 @@ int main(int argc, char** argv)
 
 	UOpenScenarioRunner* R = new UOpenScenarioRunner();
 	R->bSpawnActors = false;
+	// Kinematic unless "--simple" is passed as the 4th argument: the example expectations below assume exact scripted speeds.
+	R->Dynamics.Mode = (argc > 4 && std::string(argv[4]) == "--simple") ? EOpenScenarioDynamicsMode::Simple : EOpenScenarioDynamicsMode::Kinematic;
 	bool bFinished = false;
 	R->OnFinished.F.push_back([&]() { bFinished = true; });
 	if (!R->Initialize(nullptr, Asset)) { std::printf("initialize failed\n"); return 1; }

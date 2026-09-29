@@ -4,6 +4,7 @@
 #include "XmlFile.h"
 #include "XmlNode.h"
 #include "Algo/Reverse.h"
+#include "Misc/DefaultValueHelper.h"
 
 namespace
 {
@@ -29,6 +30,23 @@ namespace
 		C.C = AttrD(N, TEXT("c"));
 		C.D = AttrD(N, TEXT("d"));
 		return C;
+	}
+
+	/** Reads <speed max unit> (road type) or <speed sOffset max unit> (lane). Returns false if there is no numeric limit. */
+	bool ParseSpeed(const FXmlNode* N, double SBase, FOpenDriveSpeedLimit& Out)
+	{
+		FString Max;
+		if (!OSCXml::TryAttr(N, TEXT("max"), Max) || !FDefaultValueHelper::IsStringValidFloat(Max))
+		{
+			return false;
+		}
+		double V = FCString::Atod(*Max);
+		const FString Unit = AttrS(N, TEXT("unit"));
+		if (Unit.Equals(TEXT("km/h"), ESearchCase::IgnoreCase)) { V /= 3.6; }
+		else if (Unit.Equals(TEXT("mph"), ESearchCase::IgnoreCase)) { V *= 0.44704; }
+		Out.S = SBase + AttrD(N, TEXT("sOffset"));
+		Out.MaxSpeed = V;
+		return V >= 0.0;
 	}
 
 	EOpenDriveContactPoint ParseContact(const FString& S)
@@ -246,6 +264,16 @@ bool FOpenDriveMap::LoadFromString(const FString& Xml, FString& OutError)
 			Road.Geometry.Sort([](const FOpenDriveGeometry& A, const FOpenDriveGeometry& B) { return A.S < B.S; });
 		}
 
+		for (const FXmlNode* TypeNode : OSCXml::Children(RoadNode, TEXT("type")))
+		{
+			FOpenDriveSpeedLimit Limit;
+			if (ParseSpeed(OSCXml::Child(TypeNode, TEXT("speed")), AttrD(TypeNode, TEXT("s")), Limit))
+			{
+				Road.SpeedLimits.Add(Limit);
+			}
+		}
+		Road.SpeedLimits.Sort([](const FOpenDriveSpeedLimit& A, const FOpenDriveSpeedLimit& B) { return A.S < B.S; });
+
 		if (const FXmlNode* Elev = OSCXml::Child(RoadNode, TEXT("elevationProfile")))
 		{
 			for (const FXmlNode* E : OSCXml::Children(Elev, TEXT("elevation")))
@@ -282,6 +310,12 @@ bool FOpenDriveMap::LoadFromString(const FString& Xml, FString& OutError)
 							Lane.Predecessor = FCString::Atoi(*AttrS(OSCXml::Child(LaneLink, TEXT("predecessor")), TEXT("id")));
 							Lane.Successor = FCString::Atoi(*AttrS(OSCXml::Child(LaneLink, TEXT("successor")), TEXT("id")));
 						}
+						for (const FXmlNode* Sp : OSCXml::Children(LaneNode, TEXT("speed")))
+						{
+							FOpenDriveSpeedLimit Limit;
+							if (ParseSpeed(Sp, Section.S, Limit)) { Lane.SpeedLimits.Add(Limit); }
+						}
+						Lane.SpeedLimits.Sort([](const FOpenDriveSpeedLimit& A, const FOpenDriveSpeedLimit& B) { return A.S < B.S; });
 						for (const FXmlNode* W : OSCXml::Children(LaneNode, TEXT("width")))
 						{
 							Lane.Widths.Add(ParseCubic(W, TEXT("sOffset"), Section.S));
@@ -587,6 +621,73 @@ int32 FOpenDriveMap::ClampLaneId(const FOpenDriveRoad& Road, double S, int32 Lan
 		}
 	}
 	return Best;
+}
+
+// ------------------------------------------------------------------------------------------------
+// Speed limits, curvature
+// ------------------------------------------------------------------------------------------------
+
+namespace
+{
+	/** Last limit with S <= AbsS; false if the position lies before the first entry. */
+	bool LimitAt(const TArray<FOpenDriveSpeedLimit>& Limits, double AbsS, double& Out)
+	{
+		bool bFound = false;
+		for (const FOpenDriveSpeedLimit& L : Limits)
+		{
+			if (L.S <= AbsS + 1e-9)
+			{
+				Out = L.MaxSpeed;
+				bFound = true;
+			}
+			else
+			{
+				break;
+			}
+		}
+		return bFound;
+	}
+}
+
+double FOpenDriveMap::GetSpeedLimit(const FOpenDriveRoad& Road, double S, int32 LaneId) const
+{
+	double Limit;
+	if (const FOpenDriveLaneSection* Sec = FindLaneSection(Road, S))
+	{
+		if (const FOpenDriveLane* Lane = Sec->FindLane(LaneId))
+		{
+			if (LimitAt(Lane->SpeedLimits, S, Limit))
+			{
+				return Limit;
+			}
+		}
+	}
+	return LimitAt(Road.SpeedLimits, S, Limit) ? Limit : -1.0;
+}
+
+double FOpenDriveMap::GetReferenceCurvature(const FOpenDriveRoad& Road, double S) const
+{
+	const double S0 = FMath::Clamp(S - 0.5, 0.0, Road.Length);
+	const double S1 = FMath::Clamp(S + 0.5, 0.0, Road.Length);
+	if (S1 - S0 < 1e-6)
+	{
+		return 0.0;
+	}
+	double X, Y, H0, H1;
+	EvaluateReferenceLine(Road, S0, X, Y, H0);
+	EvaluateReferenceLine(Road, S1, X, Y, H1);
+	double Dh = H1 - H0;
+	while (Dh > UE_DOUBLE_PI) { Dh -= 2.0 * UE_DOUBLE_PI; }
+	while (Dh < -UE_DOUBLE_PI) { Dh += 2.0 * UE_DOUBLE_PI; }
+	return Dh / (S1 - S0);
+}
+
+double FOpenDriveMap::GetLaneCurvature(const FOpenDriveRoad& Road, double S, int32 LaneId) const
+{
+	const double K = GetReferenceCurvature(Road, S);
+	const double T = GetLaneCenterT(Road, S, LaneId) - GetLaneOffset(Road, S);
+	const double Denominator = 1.0 - K * T;
+	return FMath::Abs(Denominator) > 1e-3 ? K / Denominator : K;
 }
 
 // ------------------------------------------------------------------------------------------------

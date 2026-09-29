@@ -1,6 +1,7 @@
 #include "Mode/SOpenScenarioModePanel.h"
 #include "Authoring/OpenScenarioEditorContext.h"
 #include "Authoring/OpenScenarioEditorSettings.h"
+#include "Authoring/SOpenScenarioTransportBar.h"
 #include "OpenDrive/OpenDriveAsset.h"
 #include "OpenScenarioEditorModule.h"
 #include "Scenario/OpenScenarioAsset.h"
@@ -121,6 +122,17 @@ void SOpenScenarioModePanel::Construct(const FArguments& InArgs, FOpenScenarioEd
 				[
 					SNew(STextBlock).Text(this, &SOpenScenarioModePanel::GetInfoText).AutoWrapText(true)
 				]
+			]
+		]
+
+		+ SScrollBox::Slot().Padding(4.f)
+		[
+			SNew(SExpandableArea)
+			.AreaTitle(LOCTEXT("PlaybackSection", "Playback"))
+			.InitiallyCollapsed(false)
+			.BodyContent()
+			[
+				SNew(SOpenScenarioTransportBar, *Context)
 			]
 		]
 

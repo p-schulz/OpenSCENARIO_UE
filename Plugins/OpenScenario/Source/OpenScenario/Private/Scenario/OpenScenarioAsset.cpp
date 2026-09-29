@@ -160,7 +160,7 @@ FString UOpenScenarioAsset::MakeTemplateXml(const FString& Name)
           <Center x="1.4" y="0.0" z="0.75" />
           <Dimensions width="1.8" length="4.5" height="1.5" />
         </BoundingBox>
-        <Performance maxSpeed="60" maxAcceleration="10" maxDeceleration="10" />
+        <Performance maxSpeed="60" maxAcceleration="3.5" maxDeceleration="8" />
       </Vehicle>
     </ScenarioObject>
     <ScenarioObject name="Target">
@@ -169,7 +169,7 @@ FString UOpenScenarioAsset::MakeTemplateXml(const FString& Name)
           <Center x="1.4" y="0.0" z="0.75" />
           <Dimensions width="1.8" length="4.5" height="1.5" />
         </BoundingBox>
-        <Performance maxSpeed="60" maxAcceleration="10" maxDeceleration="10" />
+        <Performance maxSpeed="60" maxAcceleration="3.5" maxDeceleration="8" />
       </Vehicle>
     </ScenarioObject>
   </Entities>

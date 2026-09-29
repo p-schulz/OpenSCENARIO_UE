@@ -5,6 +5,7 @@
 #include "Scenario/OpenScenarioModelEdit.h"
 #include "UObject/StrongObjectPtr.h"
 #include "UObject/WeakObjectPtr.h"
+#include "Simulation/OpenScenarioActor.h"
 
 class UOpenScenarioAsset;
 class UOpenScenarioEditorSettings;
@@ -55,6 +56,20 @@ public:
 	bool ExportScenarioFile();
 	AActor* PlaceScenarioActor();
 
+	// --- Playback (drives the OpenScenario Actor of the active scenario in PIE or in the editor world) ---
+	/** State, time and time scale are cached per frame, so widgets may poll them freely. */
+	EOpenScenarioPlaybackState GetPlaybackState() const;
+	double GetPlaybackTime() const;
+	bool HasPlaybackActor() const;
+	float GetPlaybackTimeScale() const;
+	void SetPlaybackTimeScale(float Scale);
+	/** Starts (placing an OpenScenario Actor if the level has none), or resumes when paused. */
+	void PlaybackPlay();
+	void PlaybackPause();
+	void PlaybackStep();
+	void PlaybackStop();
+	void PlaybackRestart();
+
 	// --- Actor class mapping (stored in the asset) -----------------------------------------
 	void SetEntityActorClass(const FString& EntityName, const UClass* ActorClass);
 	void SetKindActorClass(EOSCEntityKind Kind, const UClass* ActorClass);
@@ -76,6 +91,10 @@ public:
 	FSimpleMulticastDelegate OnVisualizationChanged;
 
 private:
+	AOpenScenarioActor* FindPlaybackActor() const;
+	/** Applies unapplied storyboard edits so that the simulation uses them. */
+	bool PrepareForPlayback();
+	void RefreshPlaybackCache() const;
 	void HandleAssetReparsed();
 	void ReloadWorking();
 	void UnbindAsset();
@@ -91,6 +110,12 @@ private:
 	FDelegateHandle ReparsedHandle;
 	mutable TSharedPtr<const FOpenDriveMap> CachedMap;
 	mutable TWeakObjectPtr<UOpenScenarioAsset> CachedMapAsset;
+
+	mutable uint64 PlaybackCacheFrame = MAX_uint64;
+	mutable EOpenScenarioPlaybackState CachedPlaybackState = EOpenScenarioPlaybackState::Stopped;
+	mutable double CachedPlaybackTime = 0.0;
+	mutable float CachedTimeScale = 1.f;
+	mutable bool bCachedHasActor = false;
 
 	TStrongObjectPtr<UOpenScenarioEditorSettings> Settings;
 };
