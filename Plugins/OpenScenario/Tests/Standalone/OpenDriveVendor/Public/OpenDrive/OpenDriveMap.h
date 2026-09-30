@@ -1,3 +1,9 @@
+// Test-only vendored copy of the OpenDRIVE data model, frozen at the point OpenDrive_UE (a separate
+// plugin/repo) became the canonical owner of this code. The standalone harness compiles plain C++
+// against MockUE and cannot pull in a sibling plugin repository, so this file (and OpenDriveAsset.h/.cpp)
+// stays here purely to keep `run_tests.sh` exercising OpenScenario's runtime code (which still depends on
+// FOpenDriveMap/UOpenDriveAsset via the OpenDrive plugin in real Unreal builds) without an engine install.
+// If the shared model changes in OpenDrive_UE, re-sync this copy so the tests keep testing real behaviour.
 #pragma once
 
 #include "CoreMinimal.h"

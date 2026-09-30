@@ -3,6 +3,8 @@
 #include "Authoring/OpenScenarioEditorSettings.h"
 #include "Authoring/SOpenScenarioTransportBar.h"
 #include "OpenDrive/OpenDriveAsset.h"
+#include "OpenDriveEditorContext.h"
+#include "OpenDriveEditorModule.h"
 #include "OpenScenarioEditorModule.h"
 #include "Scenario/OpenScenarioAsset.h"
 #include "AssetRegistry/AssetData.h"
@@ -110,6 +112,24 @@ void SOpenScenarioModePanel::Construct(const FArguments& InArgs, FOpenScenarioEd
 					[
 						MakeButton(LOCTEXT("ImportXodr", "Import XODR..."), LOCTEXT("ImportXodrTip", "Import an OpenDRIVE road network"),
 							[this]() { return OnImport(true); }, Always)
+					]
+					+ SWrapBox::Slot().Padding(0.f, 0.f, 4.f, 4.f)
+					[
+						MakeButton(LOCTEXT("EditRoadNetwork", "Edit Road Network"), LOCTEXT("EditRoadNetworkTip", "Open the scenario's road network in the OpenDRIVE editor mode (Road List / Elevation / Superelevation tabs)"),
+							[Ctx]()
+							{
+								if (UOpenScenarioAsset* Asset = Ctx->GetAsset())
+								{
+									if (UOpenDriveAsset* Road = Asset->RoadNetwork)
+									{
+										FOpenDriveEditorModule& OpenDrive = FOpenDriveEditorModule::Get();
+										OpenDrive.GetContext().SetAsset(Road);
+										OpenDrive.OpenRoadListTab();
+									}
+								}
+								return FReply::Handled();
+							},
+							[Ctx]() { return Ctx->GetAsset() && Ctx->GetAsset()->RoadNetwork != nullptr; })
 					]
 					+ SWrapBox::Slot().Padding(0.f, 0.f, 4.f, 4.f)
 					[

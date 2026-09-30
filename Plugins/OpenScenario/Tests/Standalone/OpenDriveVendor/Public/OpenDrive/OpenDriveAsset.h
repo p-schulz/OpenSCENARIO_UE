@@ -1,3 +1,4 @@
+// Test-only vendored copy — see OpenDriveMap.h in this same directory for why this exists.
 #pragma once
 
 #include "CoreMinimal.h"

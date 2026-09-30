@@ -10,7 +10,8 @@ public class OpenScenario : ModuleRules
 		{
 			"Core",
 			"CoreUObject",
-			"Engine"
+			"Engine",
+			"OpenDrive"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]

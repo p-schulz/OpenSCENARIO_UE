@@ -1,3 +1,4 @@
+// Test-only vendored copy — see OpenDriveMap.h in the sibling Public directory for why this exists.
 #include "OpenDrive/OpenDriveAsset.h"
 #include "OpenScenarioCoordinates.h"
 #include "OpenScenarioModule.h"
