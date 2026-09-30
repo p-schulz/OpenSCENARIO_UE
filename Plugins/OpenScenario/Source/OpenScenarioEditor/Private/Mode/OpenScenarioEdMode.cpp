@@ -1,7 +1,9 @@
 #include "Mode/OpenScenarioEdMode.h"
 #include "Mode/OpenScenarioModeToolkit.h"
+#include "Authoring/OpenScenarioEditorContext.h"
 #include "Authoring/OpenScenarioMapVisualizer.h"
 #include "OpenScenarioEditorModule.h"
+#include "Editor.h"
 #include "Styling/AppStyle.h"
 
 #define LOCTEXT_NAMESPACE "OpenScenarioEdMode"
@@ -18,23 +20,28 @@ UOpenScenarioEdMode::UOpenScenarioEdMode()
 		5000);
 }
 
+void UOpenScenarioEdMode::Enter()
+{
+	Super::Enter();
+	FOpenScenarioEditorModule::Get().GetVisualizer().Invalidate();
+}
+
+void UOpenScenarioEdMode::Exit()
+{
+	FOpenScenarioEditorModule::Get().GetVisualizer().Clear();
+	Super::Exit();
+}
+
 void UOpenScenarioEdMode::CreateToolkit()
 {
 	Toolkit = MakeShared<FOpenScenarioModeToolkit>();
 }
 
-void UOpenScenarioEdMode::Render(const FSceneView* View, FViewport* Viewport, FPrimitiveDrawInterface* PDI)
+void UOpenScenarioEdMode::ModeTick(float DeltaTime)
 {
-	Super::Render(View, Viewport, PDI);
+	Super::ModeTick(DeltaTime);
 	FOpenScenarioEditorModule& Module = FOpenScenarioEditorModule::Get();
-	Module.GetVisualizer().Render(Module.GetContext(), View, PDI);
-}
-
-void UOpenScenarioEdMode::DrawHUD(FEditorViewportClient* ViewportClient, FViewport* Viewport, const FSceneView* View, FCanvas* Canvas)
-{
-	Super::DrawHUD(ViewportClient, Viewport, View, Canvas);
-	FOpenScenarioEditorModule& Module = FOpenScenarioEditorModule::Get();
-	Module.GetVisualizer().DrawLabels(Module.GetContext(), ViewportClient, View, Canvas);
+	Module.GetVisualizer().Update(Module.GetContext());
 }
 
 #undef LOCTEXT_NAMESPACE

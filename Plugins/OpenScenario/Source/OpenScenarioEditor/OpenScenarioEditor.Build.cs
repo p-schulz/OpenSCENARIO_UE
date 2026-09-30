@@ -27,7 +27,8 @@ public class OpenScenarioEditor : ModuleRules
 			"AssetTools",
 			"AssetRegistry",
 			"AssetDefinition",
-			"WorkspaceMenuStructure"
+			"WorkspaceMenuStructure",
+			"ClassViewer"
 		});
 	}
 }

@@ -4,12 +4,9 @@
 #include "OpenDrive/OpenDriveMap.h"
 #include "OpenScenarioCoordinates.h"
 #include "Scenario/OpenScenarioModelEdit.h"
-#include "CanvasItem.h"
-#include "CanvasTypes.h"
-#include "Engine/Engine.h"
-#include "EditorViewportClient.h"
-#include "SceneManagement.h"
-#include "SceneView.h"
+#include "DrawDebugHelpers.h"
+#include "Editor.h"
+#include "Engine/World.h"
 
 void FOpenScenarioMapVisualizer::AddArrow(const FVector& From, const FVector& To, const FColor& Color, float Thickness)
 {
@@ -185,58 +182,58 @@ void FOpenScenarioMapVisualizer::Rebuild(FOpenScenarioEditorContext& Context)
 	bHasCache = true;
 }
 
-void FOpenScenarioMapVisualizer::Render(FOpenScenarioEditorContext& Context, const FSceneView* View, FPrimitiveDrawInterface* PDI)
+void FOpenScenarioMapVisualizer::Clear()
 {
-	if (!Context.GetAsset())
+	if (UWorld* World = DrawnWorld.Get())
 	{
-		return;
+		FlushPersistentDebugLines(World);
+		FlushDebugStrings(World);
 	}
-	const UOpenScenarioEditorSettings& Opt = *Context.GetSettings();
-	const FTransform Origin = Context.ResolveOrigin();
-	if (!bHasCache || CachedMap != Context.GetMap().Get() || CachedSettingsRevision != Opt.Revision
-		|| CachedModelRevision != Context.GetModelRevision() || !CachedOrigin.Equals(Origin))
-	{
-		Rebuild(Context);
-	}
-
-	const double MaxDistSq = Opt.MaxDrawDistanceMeters > 0.f ? FMath::Square(static_cast<double>(Opt.MaxDrawDistanceMeters) * 100.0) : 0.0;
-	const FVector Eye = View ? View->ViewMatrices.GetViewOrigin() : FVector::ZeroVector;
-	for (const FLine& L : Lines)
-	{
-		if (MaxDistSq > 0.0 && FVector::DistSquared(Eye, L.A) > MaxDistSq)
-		{
-			continue;
-		}
-		PDI->DrawLine(L.A, L.B, FLinearColor(L.Color), SDPG_World, L.Thickness, 0.f, true);
-	}
+	DrawnWorld.Reset();
+	bHasCache = false;
 }
 
-void FOpenScenarioMapVisualizer::DrawLabels(FOpenScenarioEditorContext& Context, FEditorViewportClient* ViewportClient, const FSceneView* View, FCanvas* Canvas)
+void FOpenScenarioMapVisualizer::Update(FOpenScenarioEditorContext& Context)
 {
-	if (!bHasCache || !View || !Canvas || !Context.GetAsset())
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!World)
 	{
 		return;
 	}
-	const UOpenScenarioEditorSettings& Opt = *Context.GetSettings();
-	const double MaxDistSq = Opt.MaxDrawDistanceMeters > 0.f ? FMath::Square(static_cast<double>(Opt.MaxDrawDistanceMeters) * 100.0) : 0.0;
-	const FVector Eye = View->ViewMatrices.GetViewOrigin();
-	const float Dpi = ViewportClient ? FMath::Max(0.01f, ViewportClient->GetDPIScale()) : 1.f;
+	if (!Context.GetAsset())
+	{
+		if (DrawnWorld.IsValid())
+		{
+			Clear();
+		}
+		return;
+	}
 
+	const UOpenScenarioEditorSettings& Opt = *Context.GetSettings();
+	const FTransform Origin = Context.ResolveOrigin();
+	const bool bChanged = !bHasCache || DrawnWorld.Get() != World || CachedMap != Context.GetMap().Get()
+		|| CachedSettingsRevision != Opt.Revision || CachedModelRevision != Context.GetModelRevision() || !CachedOrigin.Equals(Origin);
+	if (!bChanged)
+	{
+		return;
+	}
+
+	Rebuild(Context);
+	FlushPersistentDebugLines(World);
+	FlushDebugStrings(World);
+	for (const FLine& L : Lines)
+	{
+		DrawDebugLine(World, L.A, L.B, L.Color, true, -1.f, SDPG_World, L.Thickness);
+	}
+	// Cap the labels so big maps stay readable and cheap.
 	int32 Drawn = 0;
 	for (const FLabel& L : Labels)
 	{
-		// Cap the labels (and skip distant ones) so big maps stay readable and cheap.
-		if (Drawn > 400 || FVector::DistSquared(Eye, L.Position) > (MaxDistSq > 0.0 ? MaxDistSq : FMath::Square(300000.0)))
+		if (Drawn++ >= 400)
 		{
-			continue;
+			break;
 		}
-		FVector2D Pixel;
-		if (FSceneView::ProjectWorldToScreen(L.Position, View->UnscaledViewRect, View->ViewMatrices.GetViewProjectionMatrix(), Pixel))
-		{
-			FCanvasTextItem Text(Pixel / Dpi, FText::FromString(L.Text), GEngine->GetSmallFont(), FLinearColor(L.Color));
-			Text.EnableShadow(FLinearColor::Black);
-			Canvas->DrawItem(Text);
-			++Drawn;
-		}
+		DrawDebugString(World, L.Position, L.Text, nullptr, L.Color, -1.f, true);
 	}
+	DrawnWorld = World;
 }

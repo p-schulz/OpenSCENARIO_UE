@@ -15,9 +15,11 @@
 #include "Misc/Paths.h"
 #include "PropertyCustomizationHelpers.h"
 #include "PropertyEditorModule.h"
-#include "SClassPropertyEntryBox.h"
+#include "ClassViewerFilter.h"
+#include "ClassViewerModule.h"
 #include "Selection.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SComboButton.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SExpandableArea.h"
 #include "Widgets/Layout/SScrollBox.h"
@@ -26,6 +28,23 @@
 #include "Widgets/Text/STextBlock.h"
 
 #define LOCTEXT_NAMESPACE "OpenScenarioModePanel"
+
+namespace
+{
+	/** Only concrete actor classes can represent scenario entities. */
+	class FActorClassFilter : public IClassViewerFilter
+	{
+	public:
+		virtual bool IsClassAllowed(const FClassViewerInitializationOptions& Options, const UClass* Class, TSharedRef<FClassViewerFilterFuncs> Funcs) override
+		{
+			return Class->IsChildOf(AActor::StaticClass()) && !Class->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists);
+		}
+		virtual bool IsUnloadedClassAllowed(const FClassViewerInitializationOptions& Options, const TSharedRef<const IUnloadedBlueprintData> Data, TSharedRef<FClassViewerFilterFuncs> Funcs) override
+		{
+			return Data->IsChildOf(AActor::StaticClass()) && !Data->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists);
+		}
+	};
+}
 
 void SOpenScenarioModePanel::Construct(const FArguments& InArgs, FOpenScenarioEditorContext& InContext)
 {
@@ -288,12 +307,32 @@ TSharedRef<SWidget> SOpenScenarioModePanel::MakeClassRow(const FText& Label, TFu
 		]
 		+ SHorizontalBox::Slot().FillWidth(0.7f).Padding(0.f, 1.f)
 		[
-			SNew(SClassPropertyEntryBox)
-			.MetaClass(AActor::StaticClass())
-			.AllowNone(true)
-			.AllowAbstract(false)
-			.SelectedClass_Lambda([Getter]() { return Getter(); })
-			.OnSetClass_Lambda([Setter](const UClass* Class) { Setter(Class); })
+			SNew(SComboButton)
+			.ButtonContent()
+			[
+				SNew(STextBlock).Text_Lambda([Getter]()
+				{
+					const UClass* Class = Getter();
+					return Class ? FText::FromString(Class->GetName()) : LOCTEXT("NoClass", "(box actor)");
+				})
+			]
+			.OnGetMenuContent_Lambda([Setter]() -> TSharedRef<SWidget>
+			{
+				FClassViewerInitializationOptions Options;
+				Options.Mode = EClassViewerMode::ClassPicker;
+				Options.DisplayMode = EClassViewerDisplayMode::TreeView;
+				Options.bShowNoneOption = true;
+				Options.ClassFilters.Add(MakeShared<FActorClassFilter>());
+				return SNew(SBox).WidthOverride(320.f).HeightOverride(400.f)
+				[
+					FModuleManager::LoadModuleChecked<FClassViewerModule>("ClassViewer").CreateClassViewer(Options,
+						FOnClassPicked::CreateLambda([Setter](UClass* Picked)
+						{
+							Setter(Picked);
+							FSlateApplication::Get().DismissAllMenus();
+						}))
+				];
+			})
 		]
 		+ SHorizontalBox::Slot().AutoWidth().Padding(4.f, 0.f, 0.f, 0.f)
 		[

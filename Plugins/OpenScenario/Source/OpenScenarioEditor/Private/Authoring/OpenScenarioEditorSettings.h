@@ -56,10 +56,6 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Visualization", meta = (ClampMin = "0.0"))
 	float ZOffsetCm = 10.0f;
 
-	/** Skip lines further than this from the camera (metres). 0 = draw everything. */
-	UPROPERTY(EditAnywhere, Category = "Visualization", meta = (ClampMin = "0.0"))
-	float MaxDrawDistanceMeters = 0.0f;
-
 	/**
 	 * Actor whose transform is the scenario origin. If empty, the first OpenScenario Actor in the level
 	 * that uses the active scenario is used, otherwise the world origin.
