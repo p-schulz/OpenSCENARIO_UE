@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "OpenScenarioVersion.h"
 #include "UObject/Object.h"
 #include "OpenDrive/OpenDriveMap.h"
 #include "OpenDriveAsset.generated.h"
@@ -68,7 +69,11 @@ public:
 	//~ UObject
 	virtual void PostInitProperties() override;
 	virtual void PostLoad() override;
+#if OSC_UE_AT_LEAST(5, 4)
 	virtual void GetAssetRegistryTags(FAssetRegistryTagsContext Context) const override;
+#else
+	virtual void GetAssetRegistryTags(TArray<FAssetRegistryTag>& OutTags) const override;
+#endif
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif

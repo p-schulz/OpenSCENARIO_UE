@@ -7,7 +7,9 @@
 #include "OpenScenarioModule.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#if OSC_UE_AT_LEAST(5, 4)
 #include "UObject/AssetRegistryTagsContext.h"
+#endif
 #include "UObject/UnrealType.h"
 
 #if WITH_EDITORONLY_DATA
@@ -285,6 +287,7 @@ void UOpenScenarioAsset::PostLoad()
 	}
 }
 
+#if OSC_UE_AT_LEAST(5, 4)
 void UOpenScenarioAsset::GetAssetRegistryTags(FAssetRegistryTagsContext Context) const
 {
 #if WITH_EDITORONLY_DATA
@@ -295,6 +298,18 @@ void UOpenScenarioAsset::GetAssetRegistryTags(FAssetRegistryTagsContext Context)
 #endif
 	Super::GetAssetRegistryTags(Context);
 }
+#else
+void UOpenScenarioAsset::GetAssetRegistryTags(TArray<FAssetRegistryTag>& OutTags) const
+{
+#if WITH_EDITORONLY_DATA
+	if (AssetImportData)
+	{
+		OutTags.Add(FAssetRegistryTag(SourceFileTagName(), AssetImportData->GetSourceData().ToJson(), FAssetRegistryTag::TT_Hidden));
+	}
+#endif
+	Super::GetAssetRegistryTags(OutTags);
+}
+#endif
 
 #if WITH_EDITOR
 void UOpenScenarioAsset::PostEditUndo()

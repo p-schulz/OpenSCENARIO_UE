@@ -1,24 +1,25 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "UObject/WeakObjectPtr.h"
 
 class FOpenScenarioEditorContext;
-class FPrimitiveDrawInterface;
-class FSceneView;
-class FCanvas;
-class FViewport;
-class FEditorViewportClient;
+class UWorld;
 
 /**
- * Draws the active scenario's OpenDRIVE network and its entities' start poses into the level editor
- * viewports. Geometry is cached and rebuilt when the map, the settings, the scenario model or the
- * origin change.
+ * Draws the active scenario's OpenDRIVE network and its entities' start poses into the editor world as
+ * persistent debug lines and strings. The geometry is rebuilt and redrawn only when the map, the settings,
+ * the scenario model or the origin change.
  */
 class FOpenScenarioMapVisualizer
 {
 public:
-	void Render(FOpenScenarioEditorContext& Context, const FSceneView* View, FPrimitiveDrawInterface* PDI);
-	void DrawLabels(FOpenScenarioEditorContext& Context, FEditorViewportClient* ViewportClient, const FSceneView* View, FCanvas* Canvas);
+	/** Call regularly (e.g. every mode tick); redraws when something changed. */
+	void Update(FOpenScenarioEditorContext& Context);
+	/** Removes the drawing from the editor world. */
+	void Clear();
+	/** Forces a redraw on the next Update. */
+	void Invalidate() { bHasCache = false; }
 
 private:
 	struct FLine
@@ -48,4 +49,5 @@ private:
 	uint32 CachedModelRevision = MAX_uint32;
 	FTransform CachedOrigin;
 	bool bHasCache = false;
+	TWeakObjectPtr<UWorld> DrawnWorld;
 };

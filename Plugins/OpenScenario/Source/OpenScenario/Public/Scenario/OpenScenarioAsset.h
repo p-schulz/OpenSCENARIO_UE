@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "OpenScenarioVersion.h"
 #include "UObject/Object.h"
 #include "Scenario/OpenScenarioModel.h"
 #include "OpenScenarioAsset.generated.h"
@@ -116,7 +117,11 @@ public:
 #if WITH_EDITOR
 	virtual void PostEditUndo() override;
 #endif
+#if OSC_UE_AT_LEAST(5, 4)
 	virtual void GetAssetRegistryTags(FAssetRegistryTagsContext Context) const override;
+#else
+	virtual void GetAssetRegistryTags(TArray<FAssetRegistryTag>& OutTags) const override;
+#endif
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif

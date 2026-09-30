@@ -7,7 +7,7 @@
 class FOpenScenarioEditorContext;
 class IDetailsView;
 class SVerticalBox;
-class FAssetData;
+struct FAssetData;
 
 /** Panel of the OpenSCENARIO editor mode. */
 class SOpenScenarioModePanel : public SCompoundWidget
