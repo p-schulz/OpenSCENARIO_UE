@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "AssetDefinitionDefault.h"
-#include "AssetDefinitions.generated.h"
+#include "OpenScenarioAssetDefinitions.generated.h"
 
 /** Content browser definition for OpenSCENARIO scenario assets. */
 UCLASS()

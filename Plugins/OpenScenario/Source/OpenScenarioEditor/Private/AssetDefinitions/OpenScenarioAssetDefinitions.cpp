@@ -1,4 +1,4 @@
-#include "AssetDefinitions/AssetDefinitions.h"
+#include "AssetDefinitions/OpenScenarioAssetDefinitions.h"
 #include "Scenario/OpenScenarioAsset.h"
 
 #define LOCTEXT_NAMESPACE "OpenScenarioAssetDefinitions"
