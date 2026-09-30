@@ -1,7 +1,9 @@
 #include "OpenDrive/OpenDriveAsset.h"
 #include "OpenScenarioCoordinates.h"
 #include "OpenScenarioModule.h"
+#if OSC_UE_AT_LEAST(5, 4)
 #include "UObject/AssetRegistryTagsContext.h"
+#endif
 #include "UObject/UnrealType.h"
 
 #if WITH_EDITORONLY_DATA
@@ -95,6 +97,7 @@ void UOpenDriveAsset::PostLoad()
 	}
 }
 
+#if OSC_UE_AT_LEAST(5, 4)
 void UOpenDriveAsset::GetAssetRegistryTags(FAssetRegistryTagsContext Context) const
 {
 #if WITH_EDITORONLY_DATA
@@ -105,6 +108,18 @@ void UOpenDriveAsset::GetAssetRegistryTags(FAssetRegistryTagsContext Context) co
 #endif
 	Super::GetAssetRegistryTags(Context);
 }
+#else
+void UOpenDriveAsset::GetAssetRegistryTags(TArray<FAssetRegistryTag>& OutTags) const
+{
+#if WITH_EDITORONLY_DATA
+	if (AssetImportData)
+	{
+		OutTags.Add(FAssetRegistryTag(SourceFileTagName(), AssetImportData->GetSourceData().ToJson(), FAssetRegistryTag::TT_Hidden));
+	}
+#endif
+	Super::GetAssetRegistryTags(OutTags);
+}
+#endif
 
 #if WITH_EDITOR
 void UOpenDriveAsset::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
