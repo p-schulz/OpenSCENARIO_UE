@@ -17,6 +17,7 @@
 #include <fstream>
 #include <sstream>
 #include <cctype>
+#include <type_traits>
 
 typedef char TCHAR;
 #define TEXT(x) x
@@ -99,7 +100,21 @@ public:
 	const T& operator[](int32 i) const { return V[i]; }
 	auto begin() { return V.begin(); } auto end() { return V.end(); }
 	auto begin() const { return V.begin(); } auto end() const { return V.end(); }
-	template <class P> void Sort(P p) { std::stable_sort(V.begin(), V.end(), p); }
+	// Real UE dereferences pointer elements before calling the predicate (TDereferenceWrapper in
+	// Templates/Sorting.h), so a TArray<T*>::Sort predicate must take T&, not T*. Mirror that here so a
+	// predicate written for the wrong (pointer) signature fails in this harness too, not only in a real
+	// UE build.
+	template <class P> void Sort(P p)
+	{
+		if constexpr (std::is_pointer<T>::value)
+		{
+			std::stable_sort(V.begin(), V.end(), [&p](T A, T B) { return p(*A, *B); });
+		}
+		else
+		{
+			std::stable_sort(V.begin(), V.end(), p);
+		}
+	}
 	int32 AddDefaulted() { V.emplace_back(); return Num() - 1; }
 	void RemoveAt(int32 i) { V.erase(V.begin() + i); }
 	void Insert(const T& t, int32 i) { V.insert(V.begin() + i, t); }
