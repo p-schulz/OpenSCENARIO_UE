@@ -76,3 +76,40 @@ struct FOpenScenarioDynamicsSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dynamics", meta = (ClampMin = "10.0", EditCondition = "Mode == EOpenScenarioDynamicsMode::Simple"))
 	double MaxLookAhead = 150.0;
 };
+
+/** Parameters of the traffic generators (TrafficSwarmAction, TrafficSourceAction, TrafficSinkAction). */
+USTRUCT(BlueprintType)
+struct FOpenScenarioTrafficSettings
+{
+	GENERATED_BODY()
+
+	/** Seed of the random generator (spawn positions, routes, speed variation). Same seed, same traffic. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic")
+	int32 RandomSeed = 1;
+
+	/** Upper bound of spawns per second and swarm after the initial fill (avoids bursts of popping actors). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic", meta = (ClampMin = "0.1"))
+	double MaxSpawnsPerSecond = 4.0;
+
+	/** Spawns are skipped if another actor is closer than this (m). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic", meta = (ClampMin = "0.0"))
+	double SpawnClearance = 8.0;
+
+	/** Remove traffic actors that have been stuck at the end of the road network for a few seconds. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic")
+	bool bDespawnAtDeadEnds = true;
+
+	/** Remove traffic actors that have been standing still for this long (s), e.g. queues behind a dead end. 0 = never. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic", meta = (ClampMin = "0.0"))
+	double StuckDespawnSeconds = 20.0;
+
+	/** Speed of spawned vehicles if neither the action nor the lane gives one (m/s). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic", meta = (ClampMin = "0.0"))
+	double DefaultVehicleSpeed = 13.9;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic", meta = (ClampMin = "0.1"))
+	double PedestrianSpeedMin = 1.0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic", meta = (ClampMin = "0.1"))
+	double PedestrianSpeedMax = 1.6;
+};

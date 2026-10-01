@@ -43,6 +43,7 @@ private:
 	// Actions
 	FOSCAction ParseAction(const FXmlNode* Node);
 	FOSCDynamics ParseDynamics(const FXmlNode* Node);
+	void ParseTrafficAction(const FXmlNode* TrafficActionNode, FOSCAction& Action);
 	void ParseTrajectory(const FXmlNode* TrajectoryNode, FOSCAction& Action);
 
 	// Triggers

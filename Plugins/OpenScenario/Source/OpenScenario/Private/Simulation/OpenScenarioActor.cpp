@@ -63,6 +63,7 @@ bool AOpenScenarioActor::StartScenario()
 	Runner->DefaultMiscObjectClass = MiscObjectActorClass;
 	Runner->EntityClassOverrides = EntityActorClasses;
 	Runner->Dynamics = Dynamics;
+	Runner->TrafficSettings = Traffic;
 	Runner->OnFinished.AddUObject(this, &AOpenScenarioActor::HandleFinished);
 	Runner->OnEntitySpawned.AddUObject(this, &AOpenScenarioActor::HandleEntitySpawned);
 
@@ -149,6 +150,11 @@ void AOpenScenarioActor::SetPlaybackState(EOpenScenarioPlaybackState NewState)
 		PlaybackState = NewState;
 		OnPlaybackStateChanged.Broadcast(NewState);
 	}
+}
+
+int32 AOpenScenarioActor::GetActiveTrafficCount() const
+{
+	return Runner ? Runner->GetTrafficCount() : 0;
 }
 
 bool AOpenScenarioActor::GetEntityDynamics(const FString& EntityName, double& OutSpeed, double& OutDesiredSpeed, double& OutLeaderGap, FString& OutLeaderName) const

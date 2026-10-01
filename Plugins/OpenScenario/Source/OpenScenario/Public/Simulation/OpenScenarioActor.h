@@ -59,6 +59,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OpenSCENARIO|Dynamics")
 	FOpenScenarioDynamicsSettings Dynamics;
 
+	/** Spawn limits, seed and speeds of TrafficSwarm/Source/Sink actions. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OpenSCENARIO|Traffic")
+	FOpenScenarioTrafficSettings Traffic;
+
 	/** Fixed simulation step in seconds. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OpenSCENARIO|Simulation", meta = (ClampMin = "0.001", ClampMax = "0.5"))
 	float FixedTimeStep = 0.02f;
@@ -137,6 +141,10 @@ public:
 	/** Speed of a scenario entity in m/s (0 if unknown). */
 	UFUNCTION(BlueprintPure, Category = "OpenSCENARIO")
 	double GetEntitySpeed(const FString& EntityName) const;
+
+	/** Number of currently active actors spawned by traffic generators. */
+	UFUNCTION(BlueprintPure, Category = "OpenSCENARIO|Traffic")
+	int32 GetActiveTrafficCount() const;
 
 	/** Diagnostics of the vehicle model for one entity. Returns false for unknown entities. */
 	UFUNCTION(BlueprintPure, Category = "OpenSCENARIO|Dynamics")

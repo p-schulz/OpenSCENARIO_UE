@@ -302,6 +302,57 @@ namespace
 			X.Close(TEXT("PrivateAction"));
 			return true;
 
+		case EOSCActionType::Traffic:
+		{
+			const FOSCTraffic& T = A.Traffic;
+			X.Open(TEXT("GlobalAction"));
+			X.Open(TEXT("TrafficAction"), FAttrs().S(TEXT("trafficName"), T.TrafficName));
+			auto WriteDefinition = [&]()
+			{
+				X.Open(TEXT("TrafficDefinition"), FAttrs().S(TEXT("name"), T.TrafficName));
+				X.Open(TEXT("VehicleCategoryDistribution"));
+				if (T.Distribution.Num() == 0)
+				{
+					X.Leaf(TEXT("VehicleCategoryDistributionEntry"), FAttrs().S(TEXT("category"), TEXT("car")).D(TEXT("weight"), 1.0));
+				}
+				for (const FOSCTrafficCategory& C : T.Distribution)
+				{
+					X.Leaf(TEXT("VehicleCategoryDistributionEntry"), FAttrs().S(TEXT("category"), C.Category).D(TEXT("weight"), C.Weight));
+				}
+				X.Close(TEXT("VehicleCategoryDistribution"));
+				X.Open(TEXT("ControllerDistribution"));
+				X.Close(TEXT("ControllerDistribution"));
+				X.Close(TEXT("TrafficDefinition"));
+			};
+			switch (T.Kind)
+			{
+			case EOSCTrafficKind::Swarm:
+				X.Open(TEXT("TrafficSwarmAction"), FAttrs().D(TEXT("semiMajorAxis"), T.SemiMajorAxis).D(TEXT("semiMinorAxis"), T.SemiMinorAxis)
+					.D(TEXT("innerRadius"), T.InnerRadius).D(TEXT("offset"), T.Offset).I(TEXT("numberOfVehicles"), T.NumberOfVehicles).D(TEXT("velocity"), T.Velocity));
+				X.Leaf(TEXT("CentralObject"), FAttrs().S(TEXT("entityRef"), T.CentralObject));
+				WriteDefinition();
+				X.Close(TEXT("TrafficSwarmAction"));
+				break;
+			case EOSCTrafficKind::Source:
+				X.Open(TEXT("TrafficSourceAction"), FAttrs().D(TEXT("rate"), T.Rate).D(TEXT("radius"), T.Radius).D(TEXT("velocity"), T.Velocity));
+				WritePosition(X, T.Position);
+				WriteDefinition();
+				X.Close(TEXT("TrafficSourceAction"));
+				break;
+			case EOSCTrafficKind::Sink:
+				X.Open(TEXT("TrafficSinkAction"), FAttrs().D(TEXT("rate"), T.Rate).D(TEXT("radius"), T.Radius));
+				WritePosition(X, T.Position);
+				X.Close(TEXT("TrafficSinkAction"));
+				break;
+			case EOSCTrafficKind::Stop:
+				X.Leaf(TEXT("TrafficStopAction"), FAttrs().S(TEXT("trafficName"), T.TrafficName));
+				break;
+			}
+			X.Close(TEXT("TrafficAction"));
+			X.Close(TEXT("GlobalAction"));
+			return true;
+		}
+
 		case EOSCActionType::Unsupported:
 		default:
 			return false;
@@ -532,6 +583,15 @@ FString FOpenScenarioWriter::Write(const FOSCScenario& S)
 	X.Open(TEXT("Actions"));
 	for (const FOSCInitActions& G : S.InitActions)
 	{
+		if (G.EntityRef.IsEmpty())
+		{
+			// Entity-less group: global actions sit directly below Init/Actions.
+			for (const FOSCAction& A : G.Actions)
+			{
+				WritePrivateAction(X, A);
+			}
+			continue;
+		}
 		X.Open(TEXT("Private"), FAttrs().S(TEXT("entityRef"), G.EntityRef));
 		for (const FOSCAction& A : G.Actions)
 		{

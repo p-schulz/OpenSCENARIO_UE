@@ -35,4 +35,12 @@ ${CXX:-g++} -std=c++20 -Wall -Wextra -Wno-unused-parameter -Wno-misleading-inden
   "$SRC/Private/Scenario/OpenScenarioModelEdit.cpp" "$SRC/Private/Simulation/OpenScenarioRunner.cpp" -o "$OUT-dynamics"
 echo "== Simple vehicle dynamics =="
 "$OUT-dynamics" "$EX"
+${CXX:-g++} -std=c++20 -Wall -Wextra -Wno-unused-parameter -Wno-misleading-indentation \
+  -I "$HERE/MockUE" -I "$SRC/Public" -I "$SRC/Private" "$HERE/traffic_test.cpp" \
+  "$SRC/Private/OpenScenarioModule.cpp" "$SRC/Private/OpenDrive/OpenDriveMap.cpp" \
+  "$SRC/Private/OpenDrive/OpenDriveAsset.cpp" "$SRC/Private/Scenario/OpenScenarioParser.cpp" \
+  "$SRC/Private/Scenario/OpenScenarioAsset.cpp" "$SRC/Private/Scenario/OpenScenarioWriter.cpp" \
+  "$SRC/Private/Scenario/OpenScenarioModelEdit.cpp" "$SRC/Private/Simulation/OpenScenarioRunner.cpp" -o "$OUT-traffic"
+echo "== Traffic generators =="
+"$OUT-traffic" "$EX"
 echo "All standalone tests passed."
