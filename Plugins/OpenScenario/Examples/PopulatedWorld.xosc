@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Populated world: a swarm of 12 cars, trucks and pedestrians around the Ego, no stop condition -->
+<OpenSCENARIO>
+  <FileHeader revMajor="1" revMinor="1" date="2025-01-01T00:00:00" description="Populated world: a swarm of 12 cars, trucks and pedestrians around the Ego, no stop condition" author="OpenSCENARIO_UE" />
+  <ParameterDeclarations />
+  <CatalogLocations />
+  <RoadNetwork><LogicFile filepath="RingRoad.xodr" /></RoadNetwork>
+  <Entities>
+    <ScenarioObject name="Ego">
+      <Vehicle name="EgoCar" vehicleCategory="car">
+        <BoundingBox><Center x="1.4" y="0.0" z="0.75" /><Dimensions width="1.8" length="4.5" height="1.5" /></BoundingBox>
+        <Performance maxSpeed="60" maxAcceleration="3.5" maxDeceleration="8" />
+      </Vehicle>
+    </ScenarioObject>
+  </Entities>
+  <Storyboard>
+    <Init>
+      <Actions>
+        <Private entityRef="Ego">
+          <PrivateAction><TeleportAction><Position><LanePosition roadId="1" laneId="-1" s="10.0" offset="0.0" /></Position></TeleportAction></PrivateAction>
+          <PrivateAction><LongitudinalAction><SpeedAction>
+            <SpeedActionDynamics dynamicsShape="step" value="0" dynamicsDimension="time" />
+            <SpeedActionTarget><AbsoluteTargetSpeed value="12.0" /></SpeedActionTarget>
+          </SpeedAction></LongitudinalAction></PrivateAction>
+        </Private>
+        <GlobalAction>
+          <TrafficAction trafficName="Town">
+            <TrafficSwarmAction semiMajorAxis="150" semiMinorAxis="100" innerRadius="20" offset="0" numberOfVehicles="12" velocity="0">
+              <CentralObject entityRef="Ego" />
+              <TrafficDefinition name="TownTraffic">
+                <VehicleCategoryDistribution>
+                  <VehicleCategoryDistributionEntry category="car" weight="0.55" />
+                  <VehicleCategoryDistributionEntry category="truck" weight="0.1" />
+                  <VehicleCategoryDistributionEntry category="pedestrian" weight="0.35" />
+                </VehicleCategoryDistribution>
+                <ControllerDistribution />
+              </TrafficDefinition>
+            </TrafficSwarmAction>
+          </TrafficAction>
+        </GlobalAction>
+      </Actions>
+    </Init>
+    <StopTrigger />
+  </Storyboard>
+</OpenSCENARIO>

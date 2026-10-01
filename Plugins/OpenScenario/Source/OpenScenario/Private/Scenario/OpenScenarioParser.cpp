@@ -597,10 +597,93 @@ void FOpenScenarioParser::ParseTrajectory(const FXmlNode* TrajectoryNode, FOSCAc
 	}
 }
 
+void FOpenScenarioParser::ParseTrafficAction(const FXmlNode* TrafficNode, FOSCAction& A)
+{
+	const FXmlNode* Inner = OSCXml::FirstChild(TrafficNode);
+	if (!Inner)
+	{
+		A.UnsupportedTag = TEXT("TrafficAction");
+		return;
+	}
+	const FString& Tag = Inner->GetTag();
+	FOSCTraffic& T = A.Traffic;
+	T.TrafficName = Attr(TrafficNode, TEXT("trafficName"), Attr(Inner, TEXT("trafficName"), A.Name));
+
+	if (Tag == TEXT("TrafficSwarmAction"))
+	{
+		T.Kind = EOSCTrafficKind::Swarm;
+		T.CentralObject = Attr(OSCXml::Child(Inner, TEXT("CentralObject")), TEXT("entityRef"));
+		T.SemiMajorAxis = AttrD(Inner, TEXT("semiMajorAxis"), T.SemiMajorAxis);
+		T.SemiMinorAxis = AttrD(Inner, TEXT("semiMinorAxis"), T.SemiMinorAxis);
+		T.InnerRadius = AttrD(Inner, TEXT("innerRadius"), T.InnerRadius);
+		T.Offset = AttrD(Inner, TEXT("offset"), 0.0);
+		T.NumberOfVehicles = AttrI(Inner, TEXT("numberOfVehicles"), T.NumberOfVehicles);
+		T.Velocity = AttrD(Inner, TEXT("velocity"), 0.0);
+	}
+	else if (Tag == TEXT("TrafficSourceAction"))
+	{
+		T.Kind = EOSCTrafficKind::Source;
+		T.Rate = AttrD(Inner, TEXT("rate"), T.Rate);
+		T.Radius = AttrD(Inner, TEXT("radius"), T.Radius);
+		T.Velocity = AttrD(Inner, TEXT("velocity"), 0.0);
+		T.Position = ParsePosition(OSCXml::Child(Inner, TEXT("Position")));
+	}
+	else if (Tag == TEXT("TrafficSinkAction"))
+	{
+		T.Kind = EOSCTrafficKind::Sink;
+		T.Rate = AttrD(Inner, TEXT("rate"), T.Rate);
+		T.Radius = AttrD(Inner, TEXT("radius"), T.Radius);
+		T.Position = ParsePosition(OSCXml::Child(Inner, TEXT("Position")));
+	}
+	else if (Tag == TEXT("TrafficStopAction"))
+	{
+		T.Kind = EOSCTrafficKind::Stop;
+		T.TrafficName = Attr(Inner, TEXT("trafficName"), T.TrafficName);
+		A.Type = EOSCActionType::Traffic;
+		return;
+	}
+	else
+	{
+		A.UnsupportedTag = Tag;
+		return;
+	}
+
+	if (const FXmlNode* Def = OSCXml::Child(Inner, TEXT("TrafficDefinition")))
+	{
+		for (const FXmlNode* Entry : OSCXml::Children(OSCXml::Child(Def, TEXT("VehicleCategoryDistribution")), TEXT("VehicleCategoryDistributionEntry")))
+		{
+			FOSCTrafficCategory C;
+			C.Category = Attr(Entry, TEXT("category"), TEXT("car"));
+			C.Weight = AttrD(Entry, TEXT("weight"), 1.0);
+			T.Distribution.Add(C);
+		}
+	}
+	A.Type = EOSCActionType::Traffic;
+}
+
 FOSCAction FOpenScenarioParser::ParseAction(const FXmlNode* Node)
 {
 	FOSCAction A;
 	A.Name = Attr(Node, TEXT("name"));
+
+	const FXmlNode* Global = Node->GetTag() == TEXT("GlobalAction") ? Node : OSCXml::Child(Node, TEXT("GlobalAction"));
+	if (Global)
+	{
+		if (const FXmlNode* Traffic = OSCXml::Child(Global, TEXT("TrafficAction")))
+		{
+			ParseTrafficAction(Traffic, A);
+		}
+		else
+		{
+			const FXmlNode* Other = OSCXml::FirstChild(Global);
+			A.UnsupportedTag = Other ? Other->GetTag() : TEXT("GlobalAction");
+		}
+		if (A.Type == EOSCActionType::Unsupported)
+		{
+			Warn(FString::Printf(TEXT("Action '%s' (<%s>) is not supported and will be ignored."), *A.Name, *A.UnsupportedTag));
+		}
+		return A;
+	}
 
 	const FXmlNode* Private = Node->GetTag() == TEXT("PrivateAction") ? Node : OSCXml::Child(Node, TEXT("PrivateAction"));
 	if (!Private)
@@ -917,9 +1000,15 @@ void FOpenScenarioParser::ParseInit(const FXmlNode* InitNode, FOSCScenario& Out)
 		}
 		Out.InitActions.Add(MoveTemp(Init));
 	}
-	if (OSCXml::Children(Actions, TEXT("GlobalAction")).Num() > 0)
+	// Global actions are kept as a group without entity.
+	FOSCInitActions Global;
+	for (const FXmlNode* GA : OSCXml::Children(Actions, TEXT("GlobalAction")))
 	{
-		Warn(TEXT("Init GlobalActions (environment, traffic) are not supported and will be ignored."));
+		Global.Actions.Add(ParseAction(GA));
+	}
+	if (Global.Actions.Num() > 0)
+	{
+		Out.InitActions.Add(MoveTemp(Global));
 	}
 }
 

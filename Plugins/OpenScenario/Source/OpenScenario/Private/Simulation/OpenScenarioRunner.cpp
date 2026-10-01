@@ -66,6 +66,13 @@ bool UOpenScenarioRunner::Initialize(UWorld* InWorld, UOpenScenarioAsset* InAsse
 	EntityIndex.Reset();
 	Instances.Reset();
 	EntityActors.Reset();
+	Generators.Reset();
+	LaneSegments.Reset();
+	LaneGrid.Reset();
+	bTrafficIndexBuilt = false;
+	NextGeneratorId = 0;
+	TrafficCounter = 0;
+	Random.Initialize(TrafficSettings.RandomSeed);
 	for (const FOSCEntity& Def : Scenario.Entities)
 	{
 		FOSCEntityState State;
@@ -208,6 +215,10 @@ void UOpenScenarioRunner::SyncActors()
 {
 	for (FOSCEntityState& E : Entities)
 	{
+		if (!E.bActive)
+		{
+			continue;
+		}
 		TObjectPtr<AActor>* Found = EntityActors.Find(E.Name);
 		if (!Found || !Found->Get())
 		{
@@ -285,12 +296,19 @@ void UOpenScenarioRunner::Step(double Dt)
 	}
 	UpdateStoryboard();
 
+	UpdateTraffic(Dt);
+
 	for (FOSCEntityState& E : Entities)
 	{
+		if (!E.bActive)
+		{
+			continue;
+		}
 		UpdateDynamics(E, Dt);
 		UpdateMotion(E, Dt);
 	}
-	for (int32 i = 0; i < Entities.Num(); ++i)
+	// Traffic may have added entities during this step; they have no previous speed yet.
+	for (int32 i = 0; i < PrevSpeed.Num() && i < Entities.Num(); ++i)
 	{
 		Entities[i].Accel = (Entities[i].Speed - PrevSpeed[i]) / Dt;
 	}
@@ -352,7 +370,7 @@ void UOpenScenarioRunner::UpdateStoryboard()
 	}
 
 	// A scenario with a StopTrigger runs until that trigger fires (as the standard requires).
-	if (bStopWhenStoryboardComplete && !Scenario.StopTrigger.bPresent && Scenario.Stories.Num() > 0)
+	if (bStopWhenStoryboardComplete && !Scenario.StopTrigger.bPresent && Scenario.Stories.Num() > 0 && !HasActiveGenerators())
 	{
 		bool bAllComplete = true;
 		for (const FOSCStory& Story : Scenario.Stories)
@@ -548,6 +566,12 @@ void UOpenScenarioRunner::StartEvent(FOSCManeuverGroup& MG, FOSCEvent& Ev)
 	Ev.Runtime.Instances.Reset();
 	for (FOSCAction& Action : Ev.Actions)
 	{
+		if (Action.Type == EOSCActionType::Traffic)
+		{
+			// Global action: one instance, independent of the maneuver group's actors.
+			Ev.Runtime.Instances.Add(CreateInstance(Action, FString()));
+			continue;
+		}
 		for (const FString& Actor : MG.Actors)
 		{
 			Ev.Runtime.Instances.Add(CreateInstance(Action, Actor));
@@ -896,6 +920,10 @@ int32 UOpenScenarioRunner::CreateInstance(FOSCAction& Action, const FString& Ent
 	{
 		Inst.EntityIndex = *Idx;
 	}
+	else if (Action.Type == EOSCActionType::Traffic)
+	{
+		// Global action without an acting entity.
+	}
 	else
 	{
 		UE_LOG(LogOpenScenario, Warning, TEXT("Action '%s' refers to unknown entity '%s'."), *Action.Name, *EntityName);
@@ -972,6 +1000,12 @@ void UOpenScenarioRunner::CancelInstance(FOSCActionInstance& Inst)
 void UOpenScenarioRunner::InitInstance(FOSCActionInstance& Inst)
 {
 	FOSCAction& A = *Inst.Def;
+	if (A.Type == EOSCActionType::Traffic)
+	{
+		StartTrafficAction(A);
+		FinishInstance(Inst);
+		return;
+	}
 	FOSCEntityState& E = Entities[Inst.EntityIndex];
 
 	switch (A.Type)
@@ -1540,6 +1574,7 @@ void UOpenScenarioRunner::UpdateMotion(FOSCEntityState& E, double Dt)
 
 void UOpenScenarioRunner::AdvanceOnRoad(FOSCEntityState& E, double Ds)
 {
+	E.bAtDeadEnd = false;
 	const bool bReversing = Ds < 0.0;
 	double Remaining = FMath::Abs(Ds);
 	// Direction of travel along the road (differs from the entity's orientation when reversing).
@@ -1597,9 +1632,19 @@ void UOpenScenarioRunner::AdvanceOnRoad(FOSCEntityState& E, double Ds)
 		}
 		if (!Chosen)
 		{
+			if (E.TrafficGenerator != INDEX_NONE && E.Def.Kind == EOSCEntityKind::Pedestrian)
+			{
+				// Walkers turn around at the end of their path instead of stopping.
+				E.bDirForward = !E.bDirForward;
+				bTravelForward = !bTravelForward;
+				E.Route.Reset();
+				E.RouteIndex = 0;
+				continue;
+			}
 			// Dead end: the vehicle stops at the end of the road.
 			E.Speed = 0.0;
 			E.DesiredSpeed = 0.0;
+			E.bAtDeadEnd = true;
 			break;
 		}
 
@@ -1857,7 +1902,12 @@ bool UOpenScenarioRunner::FindLeader(const FOSCEntityState& E, double LookDistan
 	OutGap = TNumericLimits<double>::Max();
 	for (const FOSCEntityState& O : Entities)
 	{
-		if (&O == &E || O.Def.Kind == EOSCEntityKind::External)
+		if (&O == &E || !O.bActive || O.Def.Kind == EOSCEntityKind::External)
+		{
+			continue;
+		}
+		// Cheap reject before projecting onto the path.
+		if (FMath::Square(O.X - E.X) + FMath::Square(O.Y - E.Y) > FMath::Square(LookDistance + O.Def.Length + E.Def.Length + 5.0))
 		{
 			continue;
 		}
@@ -2006,4 +2056,586 @@ void UOpenScenarioRunner::UpdateDynamics(FOSCEntityState& E, double Dt)
 	}
 	E.Speed = VNew;
 	E.bSpeedConstrained = bConstrained;
+}
+
+// ------------------------------------------------------------------------------------------------
+// Traffic generators (TrafficSwarmAction / TrafficSourceAction / TrafficSinkAction)
+// ------------------------------------------------------------------------------------------------
+
+namespace
+{
+	/** Default bounding box and kind for a TrafficDefinition category. */
+	void MakeTrafficEntityDef(const FString& Category, FOSCEntity& D)
+	{
+		D.Category = Category;
+		struct FSize { const TCHAR* Name; double L, W, H; };
+		static const FSize Sizes[] = {
+			{ TEXT("car"), 4.5, 1.8, 1.5 }, { TEXT("van"), 5.5, 2.0, 2.2 }, { TEXT("truck"), 8.0, 2.5, 3.2 },
+			{ TEXT("trailer"), 12.0, 2.5, 3.5 }, { TEXT("semitrailer"), 14.0, 2.5, 3.5 }, { TEXT("bus"), 12.0, 2.55, 3.2 },
+			{ TEXT("motorbike"), 2.2, 0.8, 1.5 }, { TEXT("bicycle"), 1.8, 0.6, 1.7 }, { TEXT("train"), 20.0, 2.8, 3.5 }, { TEXT("tram"), 20.0, 2.5, 3.5 } };
+
+		if (Category.Equals(TEXT("pedestrian"), ESearchCase::IgnoreCase))
+		{
+			D.Kind = EOSCEntityKind::Pedestrian;
+			D.Length = 0.6; D.Width = 0.6; D.Height = 1.8;
+			D.CenterX = 0.0; D.CenterY = 0.0; D.CenterZ = 0.9;
+			D.MaxSpeed = 3.0;
+			return;
+		}
+		D.Kind = EOSCEntityKind::Vehicle;
+		D.Length = 4.5; D.Width = 1.8; D.Height = 1.5;
+		for (const FSize& S : Sizes)
+		{
+			if (Category.Equals(S.Name, ESearchCase::IgnoreCase))
+			{
+				D.Length = S.L; D.Width = S.W; D.Height = S.H;
+				break;
+			}
+		}
+		D.CenterX = 0.3 * D.Length;
+		D.CenterY = 0.0;
+		D.CenterZ = 0.5 * D.Height;
+		D.MaxSpeed = 50.0;
+	}
+
+	int64 CellKey(int32 Cx, int32 Cy)
+	{
+		return (static_cast<int64>(Cx) << 32) ^ static_cast<int64>(static_cast<uint32>(Cy));
+	}
+
+	constexpr double GridCell = 100.0;
+	constexpr double SegmentLength = 20.0;
+}
+
+int32 UOpenScenarioRunner::GetTrafficCount() const
+{
+	int32 Count = 0;
+	for (const FOSCEntityState& E : Entities)
+	{
+		Count += (E.bActive && E.TrafficGenerator != INDEX_NONE) ? 1 : 0;
+	}
+	return Count;
+}
+
+bool UOpenScenarioRunner::HasActiveGenerators() const
+{
+	for (const FTrafficGenerator& G : Generators)
+	{
+		if (G.bActive)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void UOpenScenarioRunner::StartTrafficAction(const FOSCAction& Action)
+{
+	if (Action.Traffic.Kind == EOSCTrafficKind::Stop)
+	{
+		for (FTrafficGenerator& G : Generators)
+		{
+			if (G.bActive && G.Def.TrafficName == Action.Traffic.TrafficName)
+			{
+				G.bActive = false;
+			}
+		}
+		return;
+	}
+	if (!Map.IsValid())
+	{
+		UE_LOG(LogOpenScenario, Warning, TEXT("Traffic action '%s' needs a road network; it is ignored."), *Action.Traffic.TrafficName);
+		return;
+	}
+	FTrafficGenerator G;
+	G.Id = NextGeneratorId++;
+	G.Def = Action.Traffic;
+	Generators.Add(MoveTemp(G));
+}
+
+void UOpenScenarioRunner::BuildTrafficIndex()
+{
+	bTrafficIndexBuilt = true;
+	LaneSegments.Reset();
+	LaneGrid.Reset();
+	if (!Map.IsValid())
+	{
+		return;
+	}
+	for (const FOpenDriveRoad& Road : Map->GetRoads())
+	{
+		if (Road.IsJunctionRoad())
+		{
+			continue; // actors are spawned on regular roads and drive through junctions
+		}
+		for (const FOpenDriveLaneSection& Section : Road.LaneSections)
+		{
+			for (const FOpenDriveLane& Lane : Section.Lanes)
+			{
+				const bool bVehicle = Lane.IsDriving();
+				const bool bWalk = Lane.Type.Equals(TEXT("sidewalk"), ESearchCase::IgnoreCase) || Lane.Type.Equals(TEXT("walking"), ESearchCase::IgnoreCase);
+				if (!bVehicle && !bWalk)
+				{
+					continue;
+				}
+				for (double S0 = Section.S; S0 < Section.EndS - 0.5; S0 += SegmentLength)
+				{
+					FLaneSegment Seg;
+					Seg.RoadId = Road.Id;
+					Seg.LaneId = Lane.Id;
+					Seg.S0 = S0;
+					Seg.S1 = FMath::Min(Section.EndS, S0 + SegmentLength);
+					const double Mid = 0.5 * (Seg.S0 + Seg.S1);
+					const FOpenDrivePose Pose = Map->EvaluatePose(Road, Mid, Map->GetLaneCenterT(Road, Mid, Lane.Id));
+					Seg.X = Pose.X;
+					Seg.Y = Pose.Y;
+					// Walkers and vehicles share the grid; the lane type is looked up again when sampling.
+					const int32 Index = LaneSegments.Add(Seg);
+					LaneGrid.FindOrAdd(CellKey(FMath::FloorToInt(Seg.X / GridCell), FMath::FloorToInt(Seg.Y / GridCell))).Add(Index);
+				}
+			}
+		}
+	}
+	UE_LOG(LogOpenScenario, Log, TEXT("Traffic lane index: %d segments."), LaneSegments.Num());
+}
+
+void UOpenScenarioRunner::CollectSegments(double X, double Y, double Radius, bool bPedestrian, TArray<int32>& Out) const
+{
+	Out.Reset();
+	const int32 X0 = FMath::FloorToInt((X - Radius) / GridCell), X1 = FMath::FloorToInt((X + Radius) / GridCell);
+	const int32 Y0 = FMath::FloorToInt((Y - Radius) / GridCell), Y1 = FMath::FloorToInt((Y + Radius) / GridCell);
+	for (int32 Cx = X0; Cx <= X1; ++Cx)
+	{
+		for (int32 Cy = Y0; Cy <= Y1; ++Cy)
+		{
+			const TArray<int32>* Cell = LaneGrid.Find(CellKey(Cx, Cy));
+			if (!Cell)
+			{
+				continue;
+			}
+			for (const int32 Index : *Cell)
+			{
+				const FLaneSegment& Seg = LaneSegments[Index];
+				if (FMath::Square(Seg.X - X) + FMath::Square(Seg.Y - Y) > FMath::Square(Radius))
+				{
+					continue;
+				}
+				const FOpenDriveRoad* Road = Map->FindRoad(Seg.RoadId);
+				const FOpenDriveLaneSection* Section = Road ? Map->FindLaneSection(*Road, Seg.S0) : nullptr;
+				const FOpenDriveLane* Lane = Section ? Section->FindLane(Seg.LaneId) : nullptr;
+				if (!Lane)
+				{
+					continue;
+				}
+				const bool bIsWalk = !Lane->IsDriving();
+				if (bIsWalk == bPedestrian)
+				{
+					Out.Add(Index);
+				}
+			}
+		}
+	}
+}
+
+FString UOpenScenarioRunner::PickCategory(const FOSCTraffic& Def)
+{
+	double Total = 0.0;
+	for (const FOSCTrafficCategory& C : Def.Distribution)
+	{
+		Total += FMath::Max(0.0, C.Weight);
+	}
+	if (Total <= 0.0)
+	{
+		return TEXT("car");
+	}
+	double Pick = Random.FRand() * Total;
+	for (const FOSCTrafficCategory& C : Def.Distribution)
+	{
+		Pick -= FMath::Max(0.0, C.Weight);
+		if (Pick <= 0.0)
+		{
+			return C.Category;
+		}
+	}
+	return Def.Distribution.Last().Category;
+}
+
+bool UOpenScenarioRunner::IsSpotClear(double X, double Y, double Radius) const
+{
+	for (const FOSCEntityState& E : Entities)
+	{
+		if (E.bActive && FMath::Square(E.X - X) + FMath::Square(E.Y - Y) < FMath::Square(Radius))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+int32 UOpenScenarioRunner::PickLaneAt(const FOpenDriveRoad& Road, double S, bool bPedestrian)
+{
+	const FOpenDriveLaneSection* Section = Map->FindLaneSection(Road, S);
+	if (!Section)
+	{
+		return 0;
+	}
+	TArray<int32> Lanes;
+	for (const FOpenDriveLane& Lane : Section->Lanes)
+	{
+		const bool bWalk = Lane.Type.Equals(TEXT("sidewalk"), ESearchCase::IgnoreCase) || Lane.Type.Equals(TEXT("walking"), ESearchCase::IgnoreCase);
+		if (bPedestrian ? bWalk : Lane.IsDriving())
+		{
+			Lanes.Add(Lane.Id);
+		}
+	}
+	return Lanes.Num() > 0 ? Lanes[Random.RandRange(0, Lanes.Num() - 1)] : 0;
+}
+
+void UOpenScenarioRunner::ExtendRandomRoute(FOSCEntityState& E, int32 Count)
+{
+	if (!Map.IsValid() || E.Route.Num() == 0)
+	{
+		return;
+	}
+	TArray<FOpenDriveSuccessor> Successors;
+	for (int32 i = 0; i < Count; ++i)
+	{
+		const FOpenDriveRouteStep Last = E.Route.Last();
+		const FOpenDriveRoad* Road = Map->FindRoad(Last.RoadId);
+		if (!Road)
+		{
+			return;
+		}
+		Map->GetSuccessors(*Road, Last.bForward, Successors);
+		for (int32 k = Successors.Num() - 1; k >= 0; --k)
+		{
+			if (Successors[k].RoadId == Last.RoadId)
+			{
+				Successors.RemoveAt(k);
+			}
+		}
+		if (Successors.Num() == 0)
+		{
+			return;
+		}
+		const FOpenDriveSuccessor& Pick = Successors[Random.RandRange(0, Successors.Num() - 1)];
+		FOpenDriveRouteStep Step;
+		Step.RoadId = Pick.RoadId;
+		Step.bForward = Pick.bForward;
+		E.Route.Add(Step);
+	}
+}
+
+int32 UOpenScenarioRunner::SpawnTrafficEntity(FTrafficGenerator& G, const FString& Category, const FString& RoadId, int32 LaneId, double S, bool bTravelForward)
+{
+	const FOpenDriveRoad* Road = Map->FindRoad(RoadId);
+	if (!Road)
+	{
+		return INDEX_NONE;
+	}
+	FOSCEntityState E;
+	E.Name = FString::Printf(TEXT("%s_%d"), *G.Def.TrafficName, ++TrafficCounter);
+	MakeTrafficEntityDef(Category, E.Def);
+	E.Def.Name = E.Name;
+	E.TrafficGenerator = G.Id;
+	E.bOnRoad = true;
+	E.RoadId = RoadId;
+	E.S = FMath::Clamp(S, 0.0, Road->Length);
+	E.LaneId = LaneId;
+	E.bDirForward = bTravelForward;
+	UpdatePoseFromRoad(E);
+
+	double Speed;
+	if (E.Def.Kind == EOSCEntityKind::Pedestrian)
+	{
+		Speed = TrafficSettings.PedestrianSpeedMin + Random.FRand() * (TrafficSettings.PedestrianSpeedMax - TrafficSettings.PedestrianSpeedMin);
+	}
+	else
+	{
+		const double Limit = Map->GetSpeedLimit(*Road, E.S, LaneId);
+		Speed = G.Def.Velocity > 0.0 ? G.Def.Velocity : (Limit > 0.0 ? Limit : TrafficSettings.DefaultVehicleSpeed);
+		Speed *= 0.9 + 0.15 * Random.FRand();
+		if (Dynamics.bRespectSpeedLimits && Limit > 0.0)
+		{
+			Speed = FMath::Min(Speed, Limit * Dynamics.SpeedLimitFactor);
+		}
+	}
+	E.Speed = Speed;
+	E.DesiredSpeed = Speed;
+
+	FOpenDriveRouteStep First;
+	First.RoadId = RoadId;
+	First.bForward = bTravelForward;
+	E.Route.Add(First);
+	ExtendRandomRoute(E, 6);
+
+	int32 Slot = INDEX_NONE;
+	for (int32 i = 0; i < Entities.Num(); ++i)
+	{
+		if (!Entities[i].bActive)
+		{
+			Slot = i;
+			break;
+		}
+	}
+	if (Slot == INDEX_NONE)
+	{
+		Slot = Entities.Add(FOSCEntityState());
+	}
+	Entities[Slot] = MoveTemp(E);
+	EntityIndex.Add(Entities[Slot].Name, Slot);
+	if (bSpawnActors && World)
+	{
+		SpawnEntityActor(Entities[Slot]);
+	}
+	return Slot;
+}
+
+void UOpenScenarioRunner::DespawnEntity(int32 Index)
+{
+	FOSCEntityState& E = Entities[Index];
+	if (!E.bActive)
+	{
+		return;
+	}
+	E.bActive = false;
+	EntityIndex.Remove(E.Name);
+	if (TObjectPtr<AActor>* Actor = EntityActors.Find(E.Name))
+	{
+		if (Actor->Get())
+		{
+			Actor->Get()->Destroy();
+		}
+		EntityActors.Remove(E.Name);
+	}
+}
+
+void UOpenScenarioRunner::UpdateTraffic(double Dt)
+{
+	if (Generators.Num() == 0 || !Map.IsValid())
+	{
+		return;
+	}
+	if (!bTrafficIndexBuilt)
+	{
+		BuildTrafficIndex();
+	}
+
+	// Housekeeping of all traffic actors: keep their random route long enough, remove stuck ones.
+	for (int32 i = 0; i < Entities.Num(); ++i)
+	{
+		FOSCEntityState& E = Entities[i];
+		if (!E.bActive || E.TrafficGenerator == INDEX_NONE)
+		{
+			continue;
+		}
+		if (E.RouteIndex > 8)
+		{
+			const int32 Drop = E.RouteIndex - 2;
+			E.Route.RemoveAt(0, Drop);
+			E.RouteIndex -= Drop;
+			E.LookAhead.bValid = false;
+		}
+		if (E.Route.Num() - E.RouteIndex < 4)
+		{
+			ExtendRandomRoute(E, 6);
+		}
+		E.DeadEndTime = E.bAtDeadEnd ? E.DeadEndTime + Dt : 0.0;
+		E.StationaryTime = FMath::Abs(E.Speed) < 0.1 ? E.StationaryTime + Dt : 0.0;
+		if ((TrafficSettings.bDespawnAtDeadEnds && E.DeadEndTime > 3.0)
+			|| (TrafficSettings.StuckDespawnSeconds > 0.0 && E.StationaryTime > TrafficSettings.StuckDespawnSeconds))
+		{
+			DespawnEntity(i);
+		}
+	}
+
+	for (int32 g = 0; g < Generators.Num(); ++g)
+	{
+		FTrafficGenerator& G = Generators[g];
+		if (!G.bActive)
+		{
+			continue;
+		}
+		switch (G.Def.Kind)
+		{
+		case EOSCTrafficKind::Swarm: UpdateSwarm(G, Dt); break;
+		case EOSCTrafficKind::Source: UpdateSource(G, Dt); break;
+		case EOSCTrafficKind::Sink: UpdateSink(G, Dt); break;
+		default: break;
+		}
+	}
+}
+
+void UOpenScenarioRunner::UpdateSwarm(FTrafficGenerator& G, double Dt)
+{
+	const FOSCEntityState* Center = FindEntity(G.Def.CentralObject);
+	if (!Center)
+	{
+		return;
+	}
+	const double Ch = FMath::Cos(Center->Heading);
+	const double Sh = FMath::Sin(Center->Heading);
+	const double Cx = Center->X + Ch * G.Def.Offset;
+	const double Cy = Center->Y + Sh * G.Def.Offset;
+	const double A = FMath::Max(1.0, G.Def.SemiMajorAxis);
+	const double B = FMath::Max(1.0, G.Def.SemiMinorAxis);
+	const double CenterX = Center->X;
+	const double CenterY = Center->Y;
+	auto Inside = [=](double X, double Y, double Scale)
+	{
+		const double Dx = X - Cx;
+		const double Dy = Y - Cy;
+		const double U = Dx * Ch + Dy * Sh;
+		const double V = -Dx * Sh + Dy * Ch;
+		return FMath::Square(U / (A * Scale)) + FMath::Square(V / (B * Scale)) <= 1.0;
+	};
+
+	// Remove actors that left the ellipse (with some hysteresis) and count the rest.
+	int32 Count = 0;
+	for (int32 i = 0; i < Entities.Num(); ++i)
+	{
+		FOSCEntityState& E = Entities[i];
+		if (!E.bActive || E.TrafficGenerator != G.Id)
+		{
+			continue;
+		}
+		if (!Inside(E.X, E.Y, 1.15))
+		{
+			DespawnEntity(i);
+		}
+		else
+		{
+			++Count;
+		}
+	}
+	const int32 Need = G.Def.NumberOfVehicles - Count;
+	if (Need <= 0)
+	{
+		G.Accumulator = 0.0;
+		return;
+	}
+
+	int32 Budget;
+	const bool bBurst = G.bFirstUpdate;
+	if (G.bFirstUpdate)
+	{
+		G.bFirstUpdate = false;
+		Budget = Need;
+	}
+	else
+	{
+		G.Accumulator = FMath::Min(G.Accumulator + TrafficSettings.MaxSpawnsPerSecond * Dt, 2.0 + TrafficSettings.MaxSpawnsPerSecond);
+		Budget = FMath::Min(Need, FMath::FloorToInt(G.Accumulator));
+	}
+
+	const double Reach = FMath::Max(A, B) + FMath::Abs(G.Def.Offset);
+	TArray<int32> VehicleSegments, WalkSegments;
+	bool bCollected = false;
+	for (int32 n = 0; n < Budget; ++n)
+	{
+		if (!bCollected)
+		{
+			CollectSegments(Cx, Cy, Reach, false, VehicleSegments);
+			CollectSegments(Cx, Cy, Reach, true, WalkSegments);
+			bCollected = true;
+		}
+		const FString Category = PickCategory(G.Def);
+		const bool bPedestrian = Category.Equals(TEXT("pedestrian"), ESearchCase::IgnoreCase);
+		const TArray<int32>& Candidates = bPedestrian ? WalkSegments : VehicleSegments;
+		if (Candidates.Num() == 0)
+		{
+			continue;
+		}
+		const double Clearance = bPedestrian ? 2.0 : TrafficSettings.SpawnClearance;
+		bool bSpawned = false;
+		for (int32 Attempt = 0; Attempt < 16 && !bSpawned; ++Attempt)
+		{
+			const FLaneSegment& Seg = LaneSegments[Candidates[Random.RandRange(0, Candidates.Num() - 1)]];
+			const double S = Seg.S0 + Random.FRand() * (Seg.S1 - Seg.S0);
+			const FOpenDriveRoad* Road = Map->FindRoad(Seg.RoadId);
+			if (!Road)
+			{
+				continue;
+			}
+			const FOpenDrivePose Pose = Map->EvaluatePose(*Road, S, Map->GetLaneCenterT(*Road, S, Seg.LaneId));
+			if (!Inside(Pose.X, Pose.Y, 1.0) || FMath::Square(Pose.X - CenterX) + FMath::Square(Pose.Y - CenterY) < FMath::Square(G.Def.InnerRadius)
+				|| !IsSpotClear(Pose.X, Pose.Y, Clearance))
+			{
+				continue;
+			}
+			const bool bForward = bPedestrian ? Random.FRand() < 0.5f : Seg.LaneId < 0;
+			bSpawned = SpawnTrafficEntity(G, Category, Seg.RoadId, Seg.LaneId, S, bForward) != INDEX_NONE;
+		}
+		if (!bBurst)
+		{
+			G.Accumulator -= 1.0;
+		}
+	}
+}
+
+void UOpenScenarioRunner::UpdateSource(FTrafficGenerator& G, double Dt)
+{
+	G.Accumulator = FMath::Min(G.Accumulator + G.Def.Rate * Dt, 2.0);
+	if (G.Accumulator < 1.0)
+	{
+		return;
+	}
+	FOSCEntityState Spot;
+	if (!ResolvePosition(G.Def.Position, Spot, true) || !Spot.bOnRoad)
+	{
+		return;
+	}
+	const FOpenDriveRoad* Road = Map->FindRoad(Spot.RoadId);
+	if (!Road)
+	{
+		return;
+	}
+	const FString Category = PickCategory(G.Def);
+	const bool bPedestrian = Category.Equals(TEXT("pedestrian"), ESearchCase::IgnoreCase);
+	int32 Lane = Spot.LaneId;
+	const FOpenDriveLaneSection* Section = Map->FindLaneSection(*Road, Spot.S);
+	const FOpenDriveLane* Chosen = Section ? Section->FindLane(Lane) : nullptr;
+	const bool bLaneFits = Chosen && (bPedestrian ? !Chosen->IsDriving() : Chosen->IsDriving());
+	if (G.Def.Position.Type != EOSCPositionType::Lane || !bLaneFits)
+	{
+		Lane = PickLaneAt(*Road, Spot.S, bPedestrian);
+	}
+	if (Lane == 0 || !IsSpotClear(Spot.X, Spot.Y, bPedestrian ? 2.0 : TrafficSettings.SpawnClearance))
+	{
+		return;
+	}
+	const bool bForward = bPedestrian ? Random.FRand() < 0.5f : Lane < 0;
+	if (SpawnTrafficEntity(G, Category, Spot.RoadId, Lane, Spot.S, bForward) != INDEX_NONE)
+	{
+		G.Accumulator -= 1.0;
+	}
+}
+
+void UOpenScenarioRunner::UpdateSink(FTrafficGenerator& G, double Dt)
+{
+	FOSCEntityState Spot;
+	if (!ResolvePosition(G.Def.Position, Spot, false))
+	{
+		return;
+	}
+	const bool bUnlimited = G.Def.Rate <= 0.0;
+	G.Accumulator = FMath::Min(G.Accumulator + G.Def.Rate * Dt, 2.0);
+	for (int32 i = 0; i < Entities.Num(); ++i)
+	{
+		const FOSCEntityState& E = Entities[i];
+		if (!E.bActive || E.TrafficGenerator == INDEX_NONE)
+		{
+			continue;
+		}
+		if (FMath::Square(E.X - Spot.X) + FMath::Square(E.Y - Spot.Y) > FMath::Square(G.Def.Radius))
+		{
+			continue;
+		}
+		if (!bUnlimited && G.Accumulator < 1.0)
+		{
+			break;
+		}
+		DespawnEntity(i);
+		G.Accumulator -= 1.0;
+	}
 }

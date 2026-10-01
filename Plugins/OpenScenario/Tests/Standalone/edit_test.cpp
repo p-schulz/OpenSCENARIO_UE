@@ -85,6 +85,23 @@ int main(int argc, char** argv)
 		CHECK(T0 > 0 && std::fabs(T0 - T1) < 0.05);
 	}
 
+	for (const char* File : { "PopulatedWorld.xosc", "TrafficSourceSink.xosc" })
+	{
+		std::printf("== round trip (traffic) %s\n", File);
+		FOSCScenario A, B;
+		TArray<FString> MA, MB;
+		CHECK(ParseFile(*(Dir / File), A, MA));
+		CHECK(MA.Num() == 0);
+		const FString Xml1 = FOpenScenarioWriter::Write(A);
+		FOpenScenarioParser P1;
+		CHECK(P1.Parse(Xml1, Dir, TMap<FString, FString>(), B, MB));
+		CHECK(FOpenScenarioWriter::Write(B) == Xml1);
+		int32 TrafficA = 0, TrafficB = 0;
+		for (const FOSCInitActions& G : A.InitActions) { for (const FOSCAction& X : G.Actions) { TrafficA += X.Type == EOSCActionType::Traffic; } }
+		for (const FOSCInitActions& G : B.InitActions) { for (const FOSCAction& X : G.Actions) { TrafficB += X.Type == EOSCActionType::Traffic; } }
+		CHECK(TrafficA >= 1 && TrafficA == TrafficB);
+	}
+
 	std::printf("== edit operations\n");
 	FOSCScenario S;
 	TArray<FString> Msgs;

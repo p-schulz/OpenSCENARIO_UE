@@ -1,6 +1,7 @@
 // Minimal stand-in for the subset of Unreal Engine used by the plugin's runtime code (test only).
 #pragma once
 #include <string>
+#include <random>
 #include <vector>
 #include <deque>
 #include <memory>
@@ -116,7 +117,7 @@ public:
 		}
 	}
 	int32 AddDefaulted() { V.emplace_back(); return Num() - 1; }
-	void RemoveAt(int32 i) { V.erase(V.begin() + i); }
+	void RemoveAt(int32 i, int32 n = 1) { V.erase(V.begin() + i, V.begin() + i + n); }
 	void Insert(const T& t, int32 i) { V.insert(V.begin() + i, t); }
 	void Swap(int32 a, int32 b) { std::swap(V[a], V[b]); }
 	bool Contains(const T& t) const { for (auto& x : V) if (x == t) return true; return false; }
@@ -131,6 +132,8 @@ public:
 	bool Contains(const K& k) const { return Find(k) != nullptr; }
 	V& Add(const K& k, const V& v) { if (V* e = Find(k)) { *e = v; return *e; } Items.emplace_back(k, v); return Items.back().Value; }
 	void Reset() { Items.clear(); }
+	int32 Remove(const K& k) { for (size_t i = 0; i < Items.size(); ++i) if (Items[i].Key == k) { Items.erase(Items.begin() + i); return 1; } return 0; }
+	V& FindOrAdd(const K& k) { if (V* e = Find(k)) return *e; Items.emplace_back(k, V()); return Items.back().Value; }
 	int32 Num() const { return (int32)Items.size(); }
 	auto begin() { return Items.begin(); } auto end() { return Items.end(); }
 	auto begin() const { return Items.begin(); } auto end() const { return Items.end(); }
@@ -150,6 +153,8 @@ public:
 };
 template <class T, class... A> TSharedPtr<T> MakeShared(A&&... a) { return TSharedPtr<T>(std::make_shared<T>(std::forward<A>(a)...)); }
 
+struct FRandomStream { std::mt19937 G; FRandomStream() : G(1) {} void Initialize(int32 s) { G.seed((unsigned)s); }
+	float FRand() { return std::uniform_real_distribution<float>(0.f, 1.f)(G) * 0.99999f; } int32 RandRange(int32 a, int32 b) { return std::uniform_int_distribution<int32>(a, b)(G); } };
 template <class T> struct TNumericLimits { static T Max() { return std::numeric_limits<T>::max(); } };
 
 struct FMath {
@@ -161,7 +166,7 @@ struct FMath {
 	static double Sin(double a) { return std::sin(a); } static double Cos(double a) { return std::cos(a); }
 	static double Atan(double a) { return std::atan(a); } static double Atan2(double y, double x) { return std::atan2(y, x); }
 	static double Sqrt(double a) { return std::sqrt(a); } static double Fmod(double a, double b) { return std::fmod(a, b); }
-	static int32 CeilToInt(double a) { return (int32)std::ceil(a); } static int32 RoundToInt(double a) { return (int32)std::lround(a); }
+	static int32 FloorToInt(double a) { return (int32)std::floor(a); } static int32 CeilToInt(double a) { return (int32)std::ceil(a); } static int32 RoundToInt(double a) { return (int32)std::lround(a); }
 	template <class T> static T Lerp(const T& a, const T& b, double t) { return a + (b - a) * t; }
 	static double RadiansToDegrees(double r) { return r * 180.0 / UE_DOUBLE_PI; } static double DegreesToRadians(double d) { return d * UE_DOUBLE_PI / 180.0; }
 };

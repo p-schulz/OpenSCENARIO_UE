@@ -247,7 +247,94 @@ enum class EOSCActionType : uint8
 	Speed,
 	LaneChange,
 	AssignRoute,
-	FollowTrajectory
+	FollowTrajectory,
+	/** Global TrafficAction: swarm, source, sink or stop. */
+	Traffic
+};
+
+UENUM(BlueprintType)
+enum class EOSCTrafficKind : uint8
+{
+	/** Keeps a number of actors around a central entity. */
+	Swarm,
+	/** Spawns actors at a position at a given rate. */
+	Source,
+	/** Removes traffic actors near a position at a given rate. */
+	Sink,
+	/** Stops the generator with the given traffic name. */
+	Stop
+};
+
+/** One entry of a TrafficDefinition's VehicleCategoryDistribution. */
+USTRUCT(BlueprintType)
+struct FOSCTrafficCategory
+{
+	GENERATED_BODY()
+
+	/**
+	 * car, van, truck, trailer, semitrailer, bus, motorbike, bicycle, train, tram, or the extension "pedestrian"
+	 * (spawned on sidewalk/walking lanes).
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic")
+	FString Category = TEXT("car");
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic", meta = (ClampMin = "0.0"))
+	double Weight = 1.0;
+};
+
+USTRUCT(BlueprintType)
+struct FOSCTraffic
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic")
+	EOSCTrafficKind Kind = EOSCTrafficKind::Swarm;
+
+	/** Identifies the generator for a Stop action. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic")
+	FString TrafficName = TEXT("Traffic");
+
+	/** Entity the swarm is centred on. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic", meta = (EditCondition = "Kind == EOSCTrafficKind::Swarm", EditConditionHides))
+	FString CentralObject;
+
+	/** Half-length of the swarm ellipse along the central object's heading (m). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic", meta = (EditCondition = "Kind == EOSCTrafficKind::Swarm", EditConditionHides))
+	double SemiMajorAxis = 150.0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic", meta = (EditCondition = "Kind == EOSCTrafficKind::Swarm", EditConditionHides))
+	double SemiMinorAxis = 100.0;
+
+	/** Nothing is spawned closer than this to the central object (m). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic", meta = (EditCondition = "Kind == EOSCTrafficKind::Swarm", EditConditionHides))
+	double InnerRadius = 20.0;
+
+	/** Shifts the ellipse centre along the central object's heading (m). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic", meta = (EditCondition = "Kind == EOSCTrafficKind::Swarm", EditConditionHides))
+	double Offset = 0.0;
+
+	/** Number of actors (vehicles and pedestrians together) the swarm maintains. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic", meta = (ClampMin = "0", EditCondition = "Kind == EOSCTrafficKind::Swarm", EditConditionHides))
+	int32 NumberOfVehicles = 10;
+
+	/** Actors per second. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic", meta = (ClampMin = "0.0", EditCondition = "Kind == EOSCTrafficKind::Source || Kind == EOSCTrafficKind::Sink", EditConditionHides))
+	double Rate = 0.5;
+
+	/** Source/sink area around the position (m). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic", meta = (ClampMin = "0.0", EditCondition = "Kind == EOSCTrafficKind::Source || Kind == EOSCTrafficKind::Sink", EditConditionHides))
+	double Radius = 10.0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic", meta = (EditCondition = "Kind == EOSCTrafficKind::Source || Kind == EOSCTrafficKind::Sink", EditConditionHides))
+	FOSCPosition Position;
+
+	/** Initial and desired speed (m/s). 0 = use the lane's speed limit. Pedestrians walk at their own pace. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic", meta = (ClampMin = "0.0", EditCondition = "Kind != EOSCTrafficKind::Stop && Kind != EOSCTrafficKind::Sink", EditConditionHides))
+	double Velocity = 0.0;
+
+	/** Mix of spawned actors. Empty = cars only. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic", meta = (EditCondition = "Kind != EOSCTrafficKind::Stop", EditConditionHides))
+	TArray<FOSCTrafficCategory> Distribution;
 };
 
 USTRUCT(BlueprintType)
@@ -331,6 +418,10 @@ struct FOSCAction
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trajectory", meta = (EditCondition = "Type == EOSCActionType::FollowTrajectory && bTimeReference", EditConditionHides))
 	double TimeScale = 1.0;
+
+	// Traffic (global action)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic", meta = (EditCondition = "Type == EOSCActionType::Traffic", EditConditionHides))
+	FOSCTraffic Traffic;
 
 	FOSCRuntime Runtime;
 };
@@ -587,7 +678,7 @@ struct FOSCInitActions
 {
 	GENERATED_BODY()
 
-	/** Entity the actions apply to. */
+	/** Entity the actions apply to. Empty = global actions (e.g. traffic). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Init")
 	FString EntityRef;
 

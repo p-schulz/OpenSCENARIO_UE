@@ -602,6 +602,14 @@ FString FOSCModelEdit::DescribeAction(const FOSCAction& A)
 		return FString::Printf(TEXT("Route (%d waypoints)"), A.Waypoints.Num());
 	case EOSCActionType::FollowTrajectory:
 		return FString::Printf(TEXT("Trajectory (%d vertices)"), A.Vertices.Num());
+	case EOSCActionType::Traffic:
+		switch (A.Traffic.Kind)
+		{
+		case EOSCTrafficKind::Swarm: return FString::Printf(TEXT("Traffic swarm: %d around %s"), A.Traffic.NumberOfVehicles, *A.Traffic.CentralObject);
+		case EOSCTrafficKind::Source: return FString::Printf(TEXT("Traffic source: %s/s at %s"), *Num(A.Traffic.Rate), *DescribePosition(A.Traffic.Position));
+		case EOSCTrafficKind::Sink: return FString::Printf(TEXT("Traffic sink: %s/s at %s"), *Num(A.Traffic.Rate), *DescribePosition(A.Traffic.Position));
+		default: return FString::Printf(TEXT("Stop traffic '%s'"), *A.Traffic.TrafficName);
+		}
 	default:
 		return FString::Printf(TEXT("Unsupported <%s>"), *A.UnsupportedTag);
 	}
@@ -656,7 +664,7 @@ FString FOSCModelEdit::Describe(const FOSCScenario& Scenario, const FOSCNodeRef&
 	case EOSCNodeType::InitGroup:
 	{
 		const FOSCInitActions* G = static_cast<FOSCInitActions*>(Data);
-		return FString::Printf(TEXT("%s (%d actions)"), *G->EntityRef, G->Actions.Num());
+		return FString::Printf(TEXT("%s (%d actions)"), G->EntityRef.IsEmpty() ? TEXT("(global)") : *G->EntityRef, G->Actions.Num());
 	}
 	case EOSCNodeType::InitAction: return DescribeAction(*static_cast<FOSCAction*>(Data));
 	case EOSCNodeType::Story: return FString::Printf(TEXT("Story: %s"), *static_cast<FOSCStory*>(Data)->Name);
@@ -717,6 +725,11 @@ void FOSCModelEdit::Validate(const FOSCScenario& S, TArray<FString>& Issues)
 		if (A.Type == EOSCActionType::Unsupported) { Issues.Add(FString::Printf(TEXT("%s: unsupported action <%s> will not be saved."), *Where, *A.UnsupportedTag)); }
 		if ((A.Type == EOSCActionType::Speed && A.bSpeedRelative) || (A.Type == EOSCActionType::LaneChange && A.bLaneRelative)) { CheckEntity(A.RefEntity, Where); }
 		CheckPosition(A.Position, Where);
+		if (A.Type == EOSCActionType::Traffic)
+		{
+			if (A.Traffic.Kind == EOSCTrafficKind::Swarm) { CheckEntity(A.Traffic.CentralObject, Where); }
+			CheckPosition(A.Traffic.Position, Where);
+		}
 		for (const FOSCPosition& W : A.Waypoints) { CheckPosition(W, Where); }
 		for (const FOSCTrajectoryVertex& V : A.Vertices) { CheckPosition(V.Position, Where); }
 	};

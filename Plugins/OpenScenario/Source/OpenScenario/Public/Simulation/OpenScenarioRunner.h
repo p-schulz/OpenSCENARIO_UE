@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
+#include "Math/RandomStream.h"
 #include "GameFramework/Actor.h"
 #include "OpenDrive/OpenDriveMap.h"
 #include "Scenario/OpenScenarioModel.h"
@@ -64,6 +65,16 @@ struct OPENSCENARIO_API FOSCEntityState
 	// Route (road-level), see AssignRouteAction
 	TArray<FOpenDriveRouteStep> Route;
 	int32 RouteIndex = 0;
+
+	/** False for traffic actors that have been removed; their slot is reused. */
+	bool bActive = true;
+	/** Id of the traffic generator that spawned this entity, INDEX_NONE for scripted entities. */
+	int32 TrafficGenerator = INDEX_NONE;
+	/** Reached the end of the road network and cannot continue. */
+	bool bAtDeadEnd = false;
+	double DeadEndTime = 0.0;
+	/** Seconds the entity has been (almost) standing still. */
+	double StationaryTime = 0.0;
 
 	// Simple dynamics (diagnostics)
 	/** True while limits, curves or traffic keep the vehicle below its desired speed. */
@@ -130,6 +141,7 @@ public:
 
 	/** Vehicle/driver model parameters. */
 	FOpenScenarioDynamicsSettings Dynamics;
+	FOpenScenarioTrafficSettings TrafficSettings;
 
 	// --- Lifecycle ---------------------------------------------------------------------------
 	bool Initialize(UWorld* InWorld, UOpenScenarioAsset* InAsset);
@@ -144,6 +156,8 @@ public:
 	AActor* GetEntityActor(const FString& EntityName) const;
 	const FOSCEntityState* GetEntityState(const FString& EntityName) const;
 	const TArray<FOSCEntityState>& GetEntities() const { return Entities; }
+	/** Number of currently active actors spawned by traffic generators. */
+	int32 GetTrafficCount() const;
 	TSharedPtr<const FOpenDriveMap> GetRoadNetwork() const { return Map; }
 
 	FOpenScenarioEntitySpawnedNative OnEntitySpawned;
@@ -192,6 +206,39 @@ private:
 	void SetCommandedSpeed(FOSCEntityState& E, double Speed) const;
 	bool UsesSimpleDynamics(const FOSCEntityState& E) const;
 
+	// Traffic generators
+	struct FTrafficGenerator
+	{
+		int32 Id = 0;
+		FOSCTraffic Def;
+		bool bActive = true;
+		bool bFirstUpdate = true;
+		double Accumulator = 0.0;
+	};
+	struct FLaneSegment
+	{
+		FString RoadId;
+		int32 LaneId = 0;
+		double S0 = 0.0;
+		double S1 = 0.0;
+		double X = 0.0;
+		double Y = 0.0;
+	};
+	void StartTrafficAction(const FOSCAction& Action);
+	void UpdateTraffic(double Dt);
+	void UpdateSwarm(FTrafficGenerator& G, double Dt);
+	void UpdateSource(FTrafficGenerator& G, double Dt);
+	void UpdateSink(FTrafficGenerator& G, double Dt);
+	void BuildTrafficIndex();
+	void CollectSegments(double X, double Y, double Radius, bool bPedestrian, TArray<int32>& Out) const;
+	FString PickCategory(const FOSCTraffic& Def);
+	int32 SpawnTrafficEntity(FTrafficGenerator& G, const FString& Category, const FString& RoadId, int32 LaneId, double S, bool bTravelForward);
+	void DespawnEntity(int32 Index);
+	void ExtendRandomRoute(FOSCEntityState& E, int32 Count);
+	bool IsSpotClear(double X, double Y, double Radius) const;
+	int32 PickLaneAt(const FOpenDriveRoad& Road, double S, bool bPedestrian);
+	bool HasActiveGenerators() const;
+
 	// Simple vehicle dynamics
 	struct FRoadCursor
 	{
@@ -235,6 +282,13 @@ private:
 	TArray<FOSCEntityState> Entities;
 	TMap<FString, int32> EntityIndex;
 	TArray<FOSCActionInstance> Instances;
+	TArray<FTrafficGenerator> Generators;
+	TArray<FLaneSegment> LaneSegments;
+	TMap<int64, TArray<int32>> LaneGrid;
+	FRandomStream Random;
+	bool bTrafficIndexBuilt = false;
+	int32 NextGeneratorId = 0;
+	int32 TrafficCounter = 0;
 	TMap<FString, FOSCRuntime*> ElementIndex;
 
 	bool bInitPhase = false;

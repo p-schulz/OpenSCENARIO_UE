@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A source spawns a car every 2 s on road 0, sinks remove traffic on roads 3 and 5; ends after 60 s -->
+<OpenSCENARIO>
+  <FileHeader revMajor="1" revMinor="1" date="2025-01-01T00:00:00" description="A source spawns a car every 2 s on road 0, sinks remove traffic on roads 3 and 5; ends after 60 s" author="OpenSCENARIO_UE" />
+  <ParameterDeclarations />
+  <CatalogLocations />
+  <RoadNetwork><LogicFile filepath="JunctionRoad.xodr" /></RoadNetwork>
+  <Entities />
+  <Storyboard>
+    <Init>
+      <Actions>
+        <GlobalAction>
+          <TrafficAction trafficName="In">
+            <TrafficSourceAction rate="0.5" radius="5" velocity="10">
+              <Position><LanePosition roadId="0" laneId="-1" s="5.0" offset="0.0" /></Position>
+              <TrafficDefinition name="Cars"><VehicleCategoryDistribution><VehicleCategoryDistributionEntry category="car" weight="1" /></VehicleCategoryDistribution><ControllerDistribution /></TrafficDefinition>
+            </TrafficSourceAction>
+          </TrafficAction>
+        </GlobalAction>
+        <GlobalAction>
+          <TrafficAction trafficName="OutStraight">
+            <TrafficSinkAction rate="2" radius="15"><Position><LanePosition roadId="5" laneId="-1" s="90.0" offset="0.0" /></Position></TrafficSinkAction>
+          </TrafficAction>
+        </GlobalAction>
+        <GlobalAction>
+          <TrafficAction trafficName="OutLeft">
+            <TrafficSinkAction rate="2" radius="15"><Position><LanePosition roadId="3" laneId="-1" s="90.0" offset="0.0" /></Position></TrafficSinkAction>
+          </TrafficAction>
+        </GlobalAction>
+      </Actions>
+    </Init>
+    <StopTrigger><ConditionGroup>
+      <Condition name="End" delay="0" conditionEdge="rising">
+        <ByValueCondition><SimulationTimeCondition value="60.0" rule="greaterThan" /></ByValueCondition>
+      </Condition>
+    </ConditionGroup></StopTrigger>
+  </Storyboard>
+</OpenSCENARIO>
