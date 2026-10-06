@@ -20,6 +20,7 @@ enum class EOpenScenarioPlaybackState : uint8
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOpenScenarioFinishedSignature);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOpenScenarioPlaybackStateSignature, EOpenScenarioPlaybackState, NewState);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOpenScenarioSignalStateSignature, const FString&, SignalId, EOpenScenarioSignalState, NewState);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOpenScenarioEntitySpawnedSignature, const FString&, EntityName, AActor*, EntityActor);
 
 /**
@@ -59,6 +60,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OpenSCENARIO|Dynamics")
 	FOpenScenarioDynamicsSettings Dynamics;
 
+	/** Which OpenDRIVE signals/signs vehicles obey and how lights cycle when no scenario drives them. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OpenSCENARIO|Signals")
+	FOpenScenarioSignalSettings SignalSettings;
+
+	/** Draw traffic lights and signs with their current state while playing. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OpenSCENARIO|Debug")
+	bool bDrawSignals = false;
+
 	/** Spawn limits, seed and speeds of TrafficSwarm/Source/Sink actions. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OpenSCENARIO|Traffic")
 	FOpenScenarioTrafficSettings Traffic;
@@ -96,6 +105,10 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category = "OpenSCENARIO")
 	FOpenScenarioEntitySpawnedSignature OnEntitySpawned;
+
+	/** A traffic light changed state (by its cycle, a signal controller or a scenario action). */
+	UPROPERTY(BlueprintAssignable, Category = "OpenSCENARIO|Signals")
+	FOpenScenarioSignalStateSignature OnSignalStateChanged;
 
 	UPROPERTY(BlueprintAssignable, Category = "OpenSCENARIO")
 	FOpenScenarioPlaybackStateSignature OnPlaybackStateChanged;
@@ -146,6 +159,14 @@ public:
 	UFUNCTION(BlueprintPure, Category = "OpenSCENARIO|Traffic")
 	int32 GetActiveTrafficCount() const;
 
+	/** Current state of an OpenDRIVE signal by id. Returns false for unknown signals or when not running. */
+	UFUNCTION(BlueprintPure, Category = "OpenSCENARIO|Signals")
+	bool GetSignalState(const FString& SignalId, EOpenScenarioSignalState& OutState) const;
+
+	/** Forces a signal into a state, like a TrafficSignalStateAction. */
+	UFUNCTION(BlueprintCallable, Category = "OpenSCENARIO|Signals")
+	bool SetSignalState(const FString& SignalId, EOpenScenarioSignalState NewState);
+
 	/** Diagnostics of the vehicle model for one entity. Returns false for unknown entities. */
 	UFUNCTION(BlueprintPure, Category = "OpenSCENARIO|Dynamics")
 	bool GetEntityDynamics(const FString& EntityName, double& OutSpeed, double& OutDesiredSpeed, double& OutLeaderGap, FString& OutLeaderName) const;
@@ -170,6 +191,8 @@ public:
 private:
 	void HandleFinished();
 	void HandleEntitySpawned(const FString& Name, AActor* Actor);
+	void HandleSignalChanged(const FString& SignalId, EOpenScenarioSignalState State);
+	void DrawSignals() const;
 
 	void SetPlaybackState(EOpenScenarioPlaybackState NewState);
 

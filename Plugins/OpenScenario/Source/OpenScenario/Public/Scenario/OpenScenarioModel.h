@@ -249,7 +249,11 @@ enum class EOSCActionType : uint8
 	AssignRoute,
 	FollowTrajectory,
 	/** Global TrafficAction: swarm, source, sink or stop. */
-	Traffic
+	Traffic,
+	/** Global TrafficSignalStateAction: sets one OpenDRIVE signal's state. */
+	TrafficSignalState,
+	/** Global TrafficSignalControllerAction: sets the phase of a signal controller defined in the scenario. */
+	TrafficSignalController
 };
 
 UENUM(BlueprintType)
@@ -419,6 +423,22 @@ struct FOSCAction
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trajectory", meta = (EditCondition = "Type == EOSCActionType::FollowTrajectory && bTimeReference", EditConditionHides))
 	double TimeScale = 1.0;
 
+	// Traffic signals (global actions)
+	/** OpenDRIVE signal id (TrafficSignalState). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Signal", meta = (EditCondition = "Type == EOSCActionType::TrafficSignalState", EditConditionHides))
+	FString SignalId;
+
+	/** red, yellow, green or off. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Signal", meta = (EditCondition = "Type == EOSCActionType::TrafficSignalState", EditConditionHides))
+	FString SignalState = TEXT("red");
+
+	/** Name of a signal controller defined in the scenario's RoadNetwork (TrafficSignalController). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Signal", meta = (EditCondition = "Type == EOSCActionType::TrafficSignalController", EditConditionHides))
+	FString ControllerRef;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Signal", meta = (EditCondition = "Type == EOSCActionType::TrafficSignalController", EditConditionHides))
+	FString ControllerPhase;
+
 	// Traffic (global action)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traffic", meta = (EditCondition = "Type == EOSCActionType::Traffic", EditConditionHides))
 	FOSCTraffic Traffic;
@@ -468,7 +488,9 @@ enum class EOSCConditionType : uint8
 	RelativeDistance,
 	TimeHeadway,
 	Collision,
-	StandStill
+	StandStill,
+	/** Compares a signal's current state. */
+	TrafficSignal
 };
 
 USTRUCT(BlueprintType)
@@ -492,17 +514,17 @@ struct FOSCCondition
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Condition")
 	double Delay = 0.0;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compare", meta = (EditCondition = "Type != EOSCConditionType::Unsupported && Type != EOSCConditionType::ReachPosition && Type != EOSCConditionType::Collision && Type != EOSCConditionType::StandStill", EditConditionHides))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compare", meta = (EditCondition = "Type != EOSCConditionType::Unsupported && Type != EOSCConditionType::TrafficSignal && Type != EOSCConditionType::ReachPosition && Type != EOSCConditionType::Collision && Type != EOSCConditionType::StandStill", EditConditionHides))
 	EOSCRule Rule = EOSCRule::GreaterThan;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compare", meta = (EditCondition = "Type != EOSCConditionType::Unsupported && Type != EOSCConditionType::ReachPosition && Type != EOSCConditionType::Collision && Type != EOSCConditionType::StoryboardElementState", EditConditionHides))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compare", meta = (EditCondition = "Type != EOSCConditionType::Unsupported && Type != EOSCConditionType::TrafficSignal && Type != EOSCConditionType::ReachPosition && Type != EOSCConditionType::Collision && Type != EOSCConditionType::StoryboardElementState", EditConditionHides))
 	double Value = 0.0;
 
 	// By entity
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Triggering Entities", meta = (EditCondition = "Type != EOSCConditionType::Unsupported && Type != EOSCConditionType::SimulationTime && Type != EOSCConditionType::StoryboardElementState && Type != EOSCConditionType::Parameter", EditConditionHides))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Triggering Entities", meta = (EditCondition = "Type != EOSCConditionType::Unsupported && Type != EOSCConditionType::SimulationTime && Type != EOSCConditionType::StoryboardElementState && Type != EOSCConditionType::Parameter && Type != EOSCConditionType::TrafficSignal", EditConditionHides))
 	TArray<FString> TriggeringEntities;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Triggering Entities", meta = (EditCondition = "Type != EOSCConditionType::Unsupported && Type != EOSCConditionType::SimulationTime && Type != EOSCConditionType::StoryboardElementState && Type != EOSCConditionType::Parameter", EditConditionHides))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Triggering Entities", meta = (EditCondition = "Type != EOSCConditionType::Unsupported && Type != EOSCConditionType::SimulationTime && Type != EOSCConditionType::StoryboardElementState && Type != EOSCConditionType::Parameter && Type != EOSCConditionType::TrafficSignal", EditConditionHides))
 	bool bAllTriggeringEntities = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reference", meta = (EditCondition = "Type == EOSCConditionType::RelativeSpeed || Type == EOSCConditionType::RelativeDistance || Type == EOSCConditionType::TimeHeadway || Type == EOSCConditionType::Collision", EditConditionHides))
@@ -532,6 +554,13 @@ struct FOSCCondition
 	/** standbyState, runningState, completeState, startTransition, endTransition, stopTransition or skipTransition. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Storyboard Element", meta = (EditCondition = "Type == EOSCConditionType::StoryboardElementState", EditConditionHides))
 	FString ElementState = TEXT("endTransition");
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Signal", meta = (EditCondition = "Type == EOSCConditionType::TrafficSignal", EditConditionHides))
+	FString SignalId;
+
+	/** red, yellow, green or off. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Signal", meta = (EditCondition = "Type == EOSCConditionType::TrafficSignal", EditConditionHides))
+	FString SignalState = TEXT("green");
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Parameter", meta = (EditCondition = "Type == EOSCConditionType::Parameter", EditConditionHides))
 	FString ParameterRef;
@@ -703,6 +732,50 @@ struct FOSCParameterDeclaration
 };
 
 USTRUCT(BlueprintType)
+struct FOSCSignalStateEntry
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Signal")
+	FString SignalId;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Signal")
+	FString State = TEXT("red");
+};
+
+USTRUCT(BlueprintType)
+struct FOSCSignalPhase
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Signal")
+	FString Name;
+
+	/** Seconds; 0 holds the phase until a controller action changes it. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Signal", meta = (ClampMin = "0.0"))
+	double Duration = 10.0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Signal")
+	TArray<FOSCSignalStateEntry> States;
+};
+
+/** RoadNetwork/TrafficSignals/TrafficSignalController: drives the listed OpenDRIVE signals through its phases. */
+USTRUCT(BlueprintType)
+struct FOSCSignalController
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Signal")
+	FString Name;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Signal")
+	double Delay = 0.0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Signal")
+	TArray<FOSCSignalPhase> Phases;
+};
+
+USTRUCT(BlueprintType)
 struct FOSCScenario
 {
 	GENERATED_BODY()
@@ -722,6 +795,10 @@ struct FOSCScenario
 	FString RoadNetworkFile;
 
 	/** Declared top-level parameters with their file values (parameter overrides are not applied here). */
+	/** Signal controllers defined in RoadNetwork/TrafficSignals. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Road Network")
+	TArray<FOSCSignalController> SignalControllers;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Parameters")
 	TArray<FOSCParameterDeclaration> ParameterDeclarations;
 

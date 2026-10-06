@@ -294,6 +294,27 @@ bool FOpenScenarioParser::Parse(const FString& Xml, const FString& BaseDirectory
 	if (const FXmlNode* Road = OSCXml::Child(Def, TEXT("RoadNetwork")))
 	{
 		TryAttr(OSCXml::Child(Road, TEXT("LogicFile")), TEXT("filepath"), Out.RoadNetworkFile);
+		for (const FXmlNode* CtrlNode : OSCXml::Children(OSCXml::Child(Road, TEXT("TrafficSignals")), TEXT("TrafficSignalController")))
+		{
+			FOSCSignalController Ctrl;
+			Ctrl.Name = Attr(CtrlNode, TEXT("name"));
+			Ctrl.Delay = AttrD(CtrlNode, TEXT("delay"));
+			for (const FXmlNode* PhaseNode : OSCXml::Children(CtrlNode, TEXT("Phase")))
+			{
+				FOSCSignalPhase Phase;
+				Phase.Name = Attr(PhaseNode, TEXT("name"));
+				Phase.Duration = AttrD(PhaseNode, TEXT("duration"));
+				for (const FXmlNode* StateNode : OSCXml::Children(PhaseNode, TEXT("TrafficSignalState")))
+				{
+					FOSCSignalStateEntry Entry;
+					Entry.SignalId = Attr(StateNode, TEXT("trafficSignalId"));
+					Entry.State = Attr(StateNode, TEXT("state"));
+					Phase.States.Add(Entry);
+				}
+				Ctrl.Phases.Add(MoveTemp(Phase));
+			}
+			Out.SignalControllers.Add(MoveTemp(Ctrl));
+		}
 	}
 
 	ParseEntities(OSCXml::Child(Def, TEXT("Entities")), Out);
@@ -673,6 +694,25 @@ FOSCAction FOpenScenarioParser::ParseAction(const FXmlNode* Node)
 		{
 			ParseTrafficAction(Traffic, A);
 		}
+		else if (const FXmlNode* Signal = OSCXml::Child(OSCXml::Child(Global, TEXT("InfrastructureAction")), TEXT("TrafficSignalAction")))
+		{
+			if (const FXmlNode* State = OSCXml::Child(Signal, TEXT("TrafficSignalStateAction")))
+			{
+				A.Type = EOSCActionType::TrafficSignalState;
+				A.SignalId = Attr(State, TEXT("name"));
+				A.SignalState = Attr(State, TEXT("state"));
+			}
+			else if (const FXmlNode* Ctrl = OSCXml::Child(Signal, TEXT("TrafficSignalControllerAction")))
+			{
+				A.Type = EOSCActionType::TrafficSignalController;
+				A.ControllerRef = Attr(Ctrl, TEXT("trafficSignalControllerRef"));
+				A.ControllerPhase = Attr(Ctrl, TEXT("phase"));
+			}
+			else
+			{
+				A.UnsupportedTag = TEXT("TrafficSignalAction");
+			}
+		}
 		else
 		{
 			const FXmlNode* Other = OSCXml::FirstChild(Global);
@@ -937,6 +977,12 @@ FOSCCondition FOpenScenarioParser::ParseCondition(const FXmlNode* Node)
 				C.ElementType = Attr(V, TEXT("storyboardElementType"));
 				C.ElementRef = Attr(V, TEXT("storyboardElementRef"));
 				C.ElementState = Attr(V, TEXT("state"));
+			}
+			else if (Tag == TEXT("TrafficSignalCondition"))
+			{
+				C.Type = EOSCConditionType::TrafficSignal;
+				C.SignalId = Attr(V, TEXT("name"));
+				C.SignalState = Attr(V, TEXT("state"));
 			}
 			else if (Tag == TEXT("ParameterCondition"))
 			{

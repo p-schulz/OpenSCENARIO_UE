@@ -1,7 +1,6 @@
-// Test-only vendored copy — see OpenDriveMap.h in the sibling Public directory for why this exists.
 #include "OpenDrive/OpenDriveMap.h"
-#include "OpenScenarioModule.h"
-#include "OpenScenarioXml.h"
+#include "OpenDriveModule.h"
+#include "OpenDriveXml.h"
 #include "XmlFile.h"
 #include "XmlNode.h"
 #include "Algo/Reverse.h"
@@ -12,13 +11,13 @@ namespace
 	double AttrD(const FXmlNode* N, const TCHAR* Name, double Def = 0.0)
 	{
 		FString V;
-		return OSCXml::TryAttr(N, Name, V) ? FCString::Atod(*V) : Def;
+		return ODRXml::TryAttr(N, Name, V) ? FCString::Atod(*V) : Def;
 	}
 
 	FString AttrS(const FXmlNode* N, const TCHAR* Name)
 	{
 		FString V;
-		OSCXml::TryAttr(N, Name, V);
+		ODRXml::TryAttr(N, Name, V);
 		return V;
 	}
 
@@ -37,7 +36,7 @@ namespace
 	bool ParseSpeed(const FXmlNode* N, double SBase, FOpenDriveSpeedLimit& Out)
 	{
 		FString Max;
-		if (!OSCXml::TryAttr(N, TEXT("max"), Max) || !FDefaultValueHelper::IsStringValidFloat(Max))
+		if (!ODRXml::TryAttr(N, TEXT("max"), Max) || !FDefaultValueHelper::IsStringValidFloat(Max))
 		{
 			return false;
 		}
@@ -59,7 +58,7 @@ namespace
 
 	void ParseLink(const FXmlNode* LinkNode, const TCHAR* Tag, EOpenDriveElementType& OutType, FString& OutId, EOpenDriveContactPoint& OutContact)
 	{
-		const FXmlNode* N = OSCXml::Child(LinkNode, Tag);
+		const FXmlNode* N = ODRXml::Child(LinkNode, Tag);
 		if (!N)
 		{
 			return;
@@ -150,6 +149,179 @@ namespace
 	}
 }
 
+EOpenDriveRoadType ParseOpenDriveRoadType(const FString& S)
+{
+	static const TPair<const TCHAR*, EOpenDriveRoadType> Map[] = {
+		{ TEXT("rural"), EOpenDriveRoadType::Rural },
+		{ TEXT("motorway"), EOpenDriveRoadType::Motorway },
+		{ TEXT("town"), EOpenDriveRoadType::Town },
+		{ TEXT("lowSpeed"), EOpenDriveRoadType::LowSpeed },
+		{ TEXT("pedestrian"), EOpenDriveRoadType::Pedestrian },
+		{ TEXT("bicycle"), EOpenDriveRoadType::Bicycle },
+		{ TEXT("townExpressway"), EOpenDriveRoadType::TownExpressway },
+		{ TEXT("townCollector"), EOpenDriveRoadType::TownCollector },
+		{ TEXT("townArterial"), EOpenDriveRoadType::TownArterial },
+		{ TEXT("townPrivate"), EOpenDriveRoadType::TownPrivate },
+		{ TEXT("townLocal"), EOpenDriveRoadType::TownLocal },
+		{ TEXT("townPlayStreet"), EOpenDriveRoadType::TownPlayStreet },
+	};
+	for (const TPair<const TCHAR*, EOpenDriveRoadType>& Entry : Map)
+	{
+		if (S.Equals(Entry.Key, ESearchCase::IgnoreCase))
+		{
+			return Entry.Value;
+		}
+	}
+	return EOpenDriveRoadType::Unknown;
+}
+
+FString OpenDriveRoadTypeToString(EOpenDriveRoadType Type)
+{
+	switch (Type)
+	{
+	case EOpenDriveRoadType::Rural: return TEXT("rural");
+	case EOpenDriveRoadType::Motorway: return TEXT("motorway");
+	case EOpenDriveRoadType::Town: return TEXT("town");
+	case EOpenDriveRoadType::LowSpeed: return TEXT("lowSpeed");
+	case EOpenDriveRoadType::Pedestrian: return TEXT("pedestrian");
+	case EOpenDriveRoadType::Bicycle: return TEXT("bicycle");
+	case EOpenDriveRoadType::TownExpressway: return TEXT("townExpressway");
+	case EOpenDriveRoadType::TownCollector: return TEXT("townCollector");
+	case EOpenDriveRoadType::TownArterial: return TEXT("townArterial");
+	case EOpenDriveRoadType::TownPrivate: return TEXT("townPrivate");
+	case EOpenDriveRoadType::TownLocal: return TEXT("townLocal");
+	case EOpenDriveRoadType::TownPlayStreet: return TEXT("townPlayStreet");
+	case EOpenDriveRoadType::Unknown:
+	default:
+		return TEXT("unknown");
+	}
+}
+
+EOpenDriveRoadMarkType ParseOpenDriveRoadMarkType(const FString& S)
+{
+	static const TPair<const TCHAR*, EOpenDriveRoadMarkType> Map[] = {
+		{ TEXT("none"), EOpenDriveRoadMarkType::None },
+		{ TEXT("solid"), EOpenDriveRoadMarkType::Solid },
+		{ TEXT("broken"), EOpenDriveRoadMarkType::Broken },
+		{ TEXT("solid solid"), EOpenDriveRoadMarkType::SolidSolid },
+		{ TEXT("solid broken"), EOpenDriveRoadMarkType::SolidBroken },
+		{ TEXT("broken solid"), EOpenDriveRoadMarkType::BrokenSolid },
+		{ TEXT("broken broken"), EOpenDriveRoadMarkType::BrokenBroken },
+		{ TEXT("botts dots"), EOpenDriveRoadMarkType::BottsDots },
+		{ TEXT("grass"), EOpenDriveRoadMarkType::Grass },
+		{ TEXT("curb"), EOpenDriveRoadMarkType::Curb },
+		{ TEXT("edge"), EOpenDriveRoadMarkType::Edge },
+		{ TEXT("custom"), EOpenDriveRoadMarkType::Custom },
+	};
+	for (const TPair<const TCHAR*, EOpenDriveRoadMarkType>& Entry : Map)
+	{
+		if (S.Equals(Entry.Key, ESearchCase::IgnoreCase))
+		{
+			return Entry.Value;
+		}
+	}
+	return EOpenDriveRoadMarkType::Solid;
+}
+
+FString OpenDriveRoadMarkTypeToString(EOpenDriveRoadMarkType Type)
+{
+	switch (Type)
+	{
+	case EOpenDriveRoadMarkType::None: return TEXT("none");
+	case EOpenDriveRoadMarkType::Solid: return TEXT("solid");
+	case EOpenDriveRoadMarkType::Broken: return TEXT("broken");
+	case EOpenDriveRoadMarkType::SolidSolid: return TEXT("solid solid");
+	case EOpenDriveRoadMarkType::SolidBroken: return TEXT("solid broken");
+	case EOpenDriveRoadMarkType::BrokenSolid: return TEXT("broken solid");
+	case EOpenDriveRoadMarkType::BrokenBroken: return TEXT("broken broken");
+	case EOpenDriveRoadMarkType::BottsDots: return TEXT("botts dots");
+	case EOpenDriveRoadMarkType::Grass: return TEXT("grass");
+	case EOpenDriveRoadMarkType::Curb: return TEXT("curb");
+	case EOpenDriveRoadMarkType::Edge: return TEXT("edge");
+	case EOpenDriveRoadMarkType::Custom:
+	default:
+		return TEXT("custom");
+	}
+}
+
+EOpenDriveRoadMarkColor ParseOpenDriveRoadMarkColor(const FString& S)
+{
+	static const TPair<const TCHAR*, EOpenDriveRoadMarkColor> Map[] = {
+		{ TEXT("standard"), EOpenDriveRoadMarkColor::Standard },
+		{ TEXT("white"), EOpenDriveRoadMarkColor::Standard },
+		{ TEXT("yellow"), EOpenDriveRoadMarkColor::Yellow },
+		{ TEXT("red"), EOpenDriveRoadMarkColor::Red },
+		{ TEXT("blue"), EOpenDriveRoadMarkColor::Blue },
+		{ TEXT("green"), EOpenDriveRoadMarkColor::Green },
+		{ TEXT("orange"), EOpenDriveRoadMarkColor::Orange },
+		{ TEXT("violet"), EOpenDriveRoadMarkColor::Violet },
+	};
+	for (const TPair<const TCHAR*, EOpenDriveRoadMarkColor>& Entry : Map)
+	{
+		if (S.Equals(Entry.Key, ESearchCase::IgnoreCase))
+		{
+			return Entry.Value;
+		}
+	}
+	return EOpenDriveRoadMarkColor::Standard;
+}
+
+FString OpenDriveRoadMarkColorToString(EOpenDriveRoadMarkColor Color)
+{
+	switch (Color)
+	{
+	case EOpenDriveRoadMarkColor::Yellow: return TEXT("yellow");
+	case EOpenDriveRoadMarkColor::Red: return TEXT("red");
+	case EOpenDriveRoadMarkColor::Blue: return TEXT("blue");
+	case EOpenDriveRoadMarkColor::Green: return TEXT("green");
+	case EOpenDriveRoadMarkColor::Orange: return TEXT("orange");
+	case EOpenDriveRoadMarkColor::Violet: return TEXT("violet");
+	case EOpenDriveRoadMarkColor::Standard:
+	default:
+		return TEXT("standard");
+	}
+}
+
+EOpenDriveLaneChange ParseOpenDriveLaneChange(const FString& S)
+{
+	if (S.Equals(TEXT("increase"), ESearchCase::IgnoreCase)) { return EOpenDriveLaneChange::Increase; }
+	if (S.Equals(TEXT("decrease"), ESearchCase::IgnoreCase)) { return EOpenDriveLaneChange::Decrease; }
+	if (S.Equals(TEXT("both"), ESearchCase::IgnoreCase)) { return EOpenDriveLaneChange::Both; }
+	return EOpenDriveLaneChange::None;
+}
+
+FString OpenDriveLaneChangeToString(EOpenDriveLaneChange Value)
+{
+	switch (Value)
+	{
+	case EOpenDriveLaneChange::Increase: return TEXT("increase");
+	case EOpenDriveLaneChange::Decrease: return TEXT("decrease");
+	case EOpenDriveLaneChange::Both: return TEXT("both");
+	case EOpenDriveLaneChange::None:
+	default:
+		return TEXT("none");
+	}
+}
+
+EOpenDriveSignalOrientation ParseOpenDriveSignalOrientation(const FString& S)
+{
+	if (S == TEXT("+")) { return EOpenDriveSignalOrientation::Plus; }
+	if (S == TEXT("-")) { return EOpenDriveSignalOrientation::Minus; }
+	return EOpenDriveSignalOrientation::None;
+}
+
+FString OpenDriveSignalOrientationToString(EOpenDriveSignalOrientation Value)
+{
+	switch (Value)
+	{
+	case EOpenDriveSignalOrientation::Plus: return TEXT("+");
+	case EOpenDriveSignalOrientation::Minus: return TEXT("-");
+	case EOpenDriveSignalOrientation::None:
+	default:
+		return TEXT("none");
+	}
+}
+
 double FOpenDriveCubic::EvalPiecewise(const TArray<FOpenDriveCubic>& Entries, double AbsS)
 {
 	if (Entries.Num() == 0)
@@ -181,6 +353,8 @@ bool FOpenDriveMap::LoadFromString(const FString& Xml, FString& OutError)
 	RoadIndex.Reset();
 	Junctions.Reset();
 	JunctionIndex.Reset();
+	Controllers.Reset();
+	JunctionGroups.Reset();
 	Name.Reset();
 
 	FXmlFile File(Xml, EConstructMethod::ConstructFromBuffer);
@@ -196,9 +370,9 @@ bool FOpenDriveMap::LoadFromString(const FString& Xml, FString& OutError)
 		return false;
 	}
 
-	Name = AttrS(OSCXml::Child(Root, TEXT("header")), TEXT("name"));
+	Name = AttrS(ODRXml::Child(Root, TEXT("header")), TEXT("name"));
 
-	for (const FXmlNode* RoadNode : OSCXml::Children(Root, TEXT("road")))
+	for (const FXmlNode* RoadNode : ODRXml::Children(Root, TEXT("road")))
 	{
 		FOpenDriveRoad Road;
 		Road.Id = AttrS(RoadNode, TEXT("id"));
@@ -207,15 +381,15 @@ bool FOpenDriveMap::LoadFromString(const FString& Xml, FString& OutError)
 		const FString Junction = AttrS(RoadNode, TEXT("junction"));
 		Road.JunctionId = (Junction == TEXT("-1")) ? FString() : Junction;
 
-		if (const FXmlNode* Link = OSCXml::Child(RoadNode, TEXT("link")))
+		if (const FXmlNode* Link = ODRXml::Child(RoadNode, TEXT("link")))
 		{
 			ParseLink(Link, TEXT("predecessor"), Road.PredecessorType, Road.PredecessorId, Road.PredecessorContact);
 			ParseLink(Link, TEXT("successor"), Road.SuccessorType, Road.SuccessorId, Road.SuccessorContact);
 		}
 
-		if (const FXmlNode* Plan = OSCXml::Child(RoadNode, TEXT("planView")))
+		if (const FXmlNode* Plan = ODRXml::Child(RoadNode, TEXT("planView")))
 		{
-			for (const FXmlNode* GeoNode : OSCXml::Children(Plan, TEXT("geometry")))
+			for (const FXmlNode* GeoNode : ODRXml::Children(Plan, TEXT("geometry")))
 			{
 				FOpenDriveGeometry G;
 				G.S = AttrD(GeoNode, TEXT("s"));
@@ -224,18 +398,18 @@ bool FOpenDriveMap::LoadFromString(const FString& Xml, FString& OutError)
 				G.Hdg = AttrD(GeoNode, TEXT("hdg"));
 				G.Length = AttrD(GeoNode, TEXT("length"));
 
-				if (const FXmlNode* Arc = OSCXml::Child(GeoNode, TEXT("arc")))
+				if (const FXmlNode* Arc = ODRXml::Child(GeoNode, TEXT("arc")))
 				{
 					G.Type = EOpenDriveGeometryType::Arc;
 					G.Curvature = AttrD(Arc, TEXT("curvature"));
 				}
-				else if (const FXmlNode* Spiral = OSCXml::Child(GeoNode, TEXT("spiral")))
+				else if (const FXmlNode* Spiral = ODRXml::Child(GeoNode, TEXT("spiral")))
 				{
 					G.Type = EOpenDriveGeometryType::Spiral;
 					G.CurvStart = AttrD(Spiral, TEXT("curvStart"));
 					G.CurvEnd = AttrD(Spiral, TEXT("curvEnd"));
 				}
-				else if (const FXmlNode* Poly = OSCXml::Child(GeoNode, TEXT("poly3")))
+				else if (const FXmlNode* Poly = ODRXml::Child(GeoNode, TEXT("poly3")))
 				{
 					G.Type = EOpenDriveGeometryType::Poly3;
 					G.AV = AttrD(Poly, TEXT("a"));
@@ -243,7 +417,7 @@ bool FOpenDriveMap::LoadFromString(const FString& Xml, FString& OutError)
 					G.CV = AttrD(Poly, TEXT("c"));
 					G.DV = AttrD(Poly, TEXT("d"));
 				}
-				else if (const FXmlNode* PP = OSCXml::Child(GeoNode, TEXT("paramPoly3")))
+				else if (const FXmlNode* PP = ODRXml::Child(GeoNode, TEXT("paramPoly3")))
 				{
 					G.Type = EOpenDriveGeometryType::ParamPoly3;
 					G.AU = AttrD(PP, TEXT("aU"));
@@ -265,67 +439,154 @@ bool FOpenDriveMap::LoadFromString(const FString& Xml, FString& OutError)
 			Road.Geometry.Sort([](const FOpenDriveGeometry& A, const FOpenDriveGeometry& B) { return A.S < B.S; });
 		}
 
-		for (const FXmlNode* TypeNode : OSCXml::Children(RoadNode, TEXT("type")))
+		for (const FXmlNode* TypeNode : ODRXml::Children(RoadNode, TEXT("type")))
 		{
 			FOpenDriveSpeedLimit Limit;
-			if (ParseSpeed(OSCXml::Child(TypeNode, TEXT("speed")), AttrD(TypeNode, TEXT("s")), Limit))
+			if (ParseSpeed(ODRXml::Child(TypeNode, TEXT("speed")), AttrD(TypeNode, TEXT("s")), Limit))
 			{
 				Road.SpeedLimits.Add(Limit);
 			}
+			FOpenDriveRoadTypeEntry TypeEntry;
+			TypeEntry.S = AttrD(TypeNode, TEXT("s"));
+			TypeEntry.Type = ParseOpenDriveRoadType(AttrS(TypeNode, TEXT("type")));
+			TypeEntry.Country = AttrS(TypeNode, TEXT("country"));
+			Road.Types.Add(TypeEntry);
 		}
 		Road.SpeedLimits.Sort([](const FOpenDriveSpeedLimit& A, const FOpenDriveSpeedLimit& B) { return A.S < B.S; });
+		Road.Types.Sort([](const FOpenDriveRoadTypeEntry& A, const FOpenDriveRoadTypeEntry& B) { return A.S < B.S; });
 
-		if (const FXmlNode* Elev = OSCXml::Child(RoadNode, TEXT("elevationProfile")))
+		if (const FXmlNode* Elev = ODRXml::Child(RoadNode, TEXT("elevationProfile")))
 		{
-			for (const FXmlNode* E : OSCXml::Children(Elev, TEXT("elevation")))
+			for (const FXmlNode* E : ODRXml::Children(Elev, TEXT("elevation")))
 			{
 				Road.Elevation.Add(ParseCubic(E, TEXT("s"), 0.0));
 			}
 			Road.Elevation.Sort([](const FOpenDriveCubic& A, const FOpenDriveCubic& B) { return A.S < B.S; });
 		}
 
-		if (const FXmlNode* Lanes = OSCXml::Child(RoadNode, TEXT("lanes")))
+		if (const FXmlNode* Lateral = ODRXml::Child(RoadNode, TEXT("lateralProfile")))
 		{
-			for (const FXmlNode* Off : OSCXml::Children(Lanes, TEXT("laneOffset")))
+			for (const FXmlNode* E : ODRXml::Children(Lateral, TEXT("superelevation")))
+			{
+				Road.Superelevation.Add(ParseCubic(E, TEXT("s"), 0.0));
+			}
+			Road.Superelevation.Sort([](const FOpenDriveCubic& A, const FOpenDriveCubic& B) { return A.S < B.S; });
+
+			for (const FXmlNode* E : ODRXml::Children(Lateral, TEXT("crossfall")))
+			{
+				FOpenDriveCrossfallEntry Entry;
+				const FString SideStr = AttrS(E, TEXT("side"));
+				Entry.Side = SideStr.Equals(TEXT("left"), ESearchCase::IgnoreCase) ? EOpenDriveCrossfallSide::Left
+					: SideStr.Equals(TEXT("right"), ESearchCase::IgnoreCase) ? EOpenDriveCrossfallSide::Right
+					: EOpenDriveCrossfallSide::Both;
+				Entry.Cubic = ParseCubic(E, TEXT("s"), 0.0);
+				Road.Crossfall.Add(Entry);
+			}
+			Road.Crossfall.Sort([](const FOpenDriveCrossfallEntry& A, const FOpenDriveCrossfallEntry& B) { return A.Cubic.S < B.Cubic.S; });
+
+			for (const FXmlNode* E : ODRXml::Children(Lateral, TEXT("shape")))
+			{
+				FOpenDriveShapeEntry Entry;
+				Entry.S = AttrD(E, TEXT("s"));
+				Entry.T = AttrD(E, TEXT("t"));
+				Entry.A = AttrD(E, TEXT("a"));
+				Entry.B = AttrD(E, TEXT("b"));
+				Entry.C = AttrD(E, TEXT("c"));
+				Entry.D = AttrD(E, TEXT("d"));
+				Road.Shape.Add(Entry);
+			}
+			Road.Shape.Sort([](const FOpenDriveShapeEntry& A, const FOpenDriveShapeEntry& B) { return A.S != B.S ? A.S < B.S : A.T < B.T; });
+		}
+
+		if (const FXmlNode* Lanes = ODRXml::Child(RoadNode, TEXT("lanes")))
+		{
+			for (const FXmlNode* Off : ODRXml::Children(Lanes, TEXT("laneOffset")))
 			{
 				Road.LaneOffset.Add(ParseCubic(Off, TEXT("s"), 0.0));
 			}
 			Road.LaneOffset.Sort([](const FOpenDriveCubic& A, const FOpenDriveCubic& B) { return A.S < B.S; });
 
-			for (const FXmlNode* SecNode : OSCXml::Children(Lanes, TEXT("laneSection")))
+			for (const FXmlNode* SecNode : ODRXml::Children(Lanes, TEXT("laneSection")))
 			{
 				FOpenDriveLaneSection Section;
 				Section.S = AttrD(SecNode, TEXT("s"));
 
-				static const TCHAR* const Sides[] = { TEXT("left"), TEXT("right") };
+				static const TCHAR* const Sides[] = { TEXT("left"), TEXT("center"), TEXT("right") };
 				for (const TCHAR* Side : Sides)
 				{
-					const FXmlNode* SideNode = OSCXml::Child(SecNode, Side);
-					for (const FXmlNode* LaneNode : OSCXml::Children(SideNode, TEXT("lane")))
+					const FXmlNode* SideNode = ODRXml::Child(SecNode, Side);
+					for (const FXmlNode* LaneNode : ODRXml::Children(SideNode, TEXT("lane")))
 					{
 						FOpenDriveLane Lane;
 						Lane.Id = FCString::Atoi(*AttrS(LaneNode, TEXT("id")));
 						Lane.Type = AttrS(LaneNode, TEXT("type"));
-						if (const FXmlNode* LaneLink = OSCXml::Child(LaneNode, TEXT("link")))
+						if (const FXmlNode* LaneLink = ODRXml::Child(LaneNode, TEXT("link")))
 						{
-							Lane.Predecessor = FCString::Atoi(*AttrS(OSCXml::Child(LaneLink, TEXT("predecessor")), TEXT("id")));
-							Lane.Successor = FCString::Atoi(*AttrS(OSCXml::Child(LaneLink, TEXT("successor")), TEXT("id")));
+							Lane.Predecessor = FCString::Atoi(*AttrS(ODRXml::Child(LaneLink, TEXT("predecessor")), TEXT("id")));
+							Lane.Successor = FCString::Atoi(*AttrS(ODRXml::Child(LaneLink, TEXT("successor")), TEXT("id")));
 						}
-						for (const FXmlNode* Sp : OSCXml::Children(LaneNode, TEXT("speed")))
+						for (const FXmlNode* Sp : ODRXml::Children(LaneNode, TEXT("speed")))
 						{
 							FOpenDriveSpeedLimit Limit;
 							if (ParseSpeed(Sp, Section.S, Limit)) { Lane.SpeedLimits.Add(Limit); }
 						}
 						Lane.SpeedLimits.Sort([](const FOpenDriveSpeedLimit& A, const FOpenDriveSpeedLimit& B) { return A.S < B.S; });
-						for (const FXmlNode* W : OSCXml::Children(LaneNode, TEXT("width")))
+						for (const FXmlNode* W : ODRXml::Children(LaneNode, TEXT("width")))
 						{
 							Lane.Widths.Add(ParseCubic(W, TEXT("sOffset"), Section.S));
 						}
 						Lane.Widths.Sort([](const FOpenDriveCubic& A, const FOpenDriveCubic& B) { return A.S < B.S; });
-						if (Lane.Id != 0)
+						for (const FXmlNode* RM : ODRXml::Children(LaneNode, TEXT("roadMark")))
 						{
-							Section.Lanes.Add(MoveTemp(Lane));
+							FOpenDriveRoadMarkEntry Entry;
+							Entry.S = Section.S + AttrD(RM, TEXT("sOffset"));
+							Entry.Type = ParseOpenDriveRoadMarkType(AttrS(RM, TEXT("type")));
+							Entry.Weight = AttrS(RM, TEXT("weight")).Equals(TEXT("bold"), ESearchCase::IgnoreCase) ? EOpenDriveRoadMarkWeight::Bold : EOpenDriveRoadMarkWeight::Standard;
+							Entry.Color = ParseOpenDriveRoadMarkColor(AttrS(RM, TEXT("color")));
+							FString WidthStr;
+							Entry.Width = ODRXml::TryAttr(RM, TEXT("width"), WidthStr) ? FCString::Atod(*WidthStr) : -1.0;
+							Entry.LaneChange = ParseOpenDriveLaneChange(AttrS(RM, TEXT("laneChange")));
+							Entry.Height = AttrD(RM, TEXT("height"), 0.0);
+							Lane.RoadMarks.Add(Entry);
 						}
+						Lane.RoadMarks.Sort([](const FOpenDriveRoadMarkEntry& A, const FOpenDriveRoadMarkEntry& B) { return A.S < B.S; });
+						for (const FXmlNode* Mat : ODRXml::Children(LaneNode, TEXT("material")))
+						{
+							FOpenDriveLaneMaterialEntry Entry;
+							Entry.S = Section.S + AttrD(Mat, TEXT("sOffset"));
+							Entry.Friction = AttrD(Mat, TEXT("friction"), 1.0);
+							Entry.Roughness = AttrD(Mat, TEXT("roughness"), 0.0);
+							Entry.Surface = AttrS(Mat, TEXT("surface"));
+							Lane.Materials.Add(Entry);
+						}
+						Lane.Materials.Sort([](const FOpenDriveLaneMaterialEntry& A, const FOpenDriveLaneMaterialEntry& B) { return A.S < B.S; });
+						for (const FXmlNode* Acc : ODRXml::Children(LaneNode, TEXT("access")))
+						{
+							FOpenDriveLaneAccessEntry Entry;
+							Entry.S = Section.S + AttrD(Acc, TEXT("sOffset"));
+							Entry.bAllow = !AttrS(Acc, TEXT("rule")).Equals(TEXT("deny"), ESearchCase::IgnoreCase);
+							Entry.Restriction = AttrS(Acc, TEXT("restriction"));
+							Lane.Access.Add(Entry);
+						}
+						Lane.Access.Sort([](const FOpenDriveLaneAccessEntry& A, const FOpenDriveLaneAccessEntry& B) { return A.S < B.S; });
+						for (const FXmlNode* Rule : ODRXml::Children(LaneNode, TEXT("rule")))
+						{
+							FOpenDriveLaneRuleEntry Entry;
+							Entry.S = Section.S + AttrD(Rule, TEXT("sOffset"));
+							Entry.Value = AttrS(Rule, TEXT("value"));
+							Lane.Rules.Add(Entry);
+						}
+						Lane.Rules.Sort([](const FOpenDriveLaneRuleEntry& A, const FOpenDriveLaneRuleEntry& B) { return A.S < B.S; });
+						for (const FXmlNode* Ht : ODRXml::Children(LaneNode, TEXT("height")))
+						{
+							FOpenDriveLaneHeightEntry Entry;
+							Entry.S = Section.S + AttrD(Ht, TEXT("sOffset"));
+							Entry.InnerHeight = AttrD(Ht, TEXT("inner"), 0.0);
+							Entry.OuterHeight = AttrD(Ht, TEXT("outer"), 0.0);
+							Lane.Heights.Add(Entry);
+						}
+						Lane.Heights.Sort([](const FOpenDriveLaneHeightEntry& A, const FOpenDriveLaneHeightEntry& B) { return A.S < B.S; });
+						Section.Lanes.Add(MoveTemp(Lane));
 					}
 				}
 				Section.Lanes.Sort([](const FOpenDriveLane& A, const FOpenDriveLane& B) { return A.Id < B.Id; });
@@ -338,9 +599,61 @@ bool FOpenDriveMap::LoadFromString(const FString& Xml, FString& OutError)
 			}
 		}
 
+		if (const FXmlNode* Signals = ODRXml::Child(RoadNode, TEXT("signals")))
+		{
+			for (const FXmlNode* SigNode : ODRXml::Children(Signals, TEXT("signal")))
+			{
+				FOpenDriveSignal Sig;
+				Sig.Id = AttrS(SigNode, TEXT("id"));
+				Sig.Name = AttrS(SigNode, TEXT("name"));
+				Sig.S = AttrD(SigNode, TEXT("s"));
+				Sig.T = AttrD(SigNode, TEXT("t"));
+				Sig.ZOffset = AttrD(SigNode, TEXT("zOffset"));
+				Sig.bDynamic = AttrS(SigNode, TEXT("dynamic")).Equals(TEXT("yes"), ESearchCase::IgnoreCase);
+				Sig.Orientation = ParseOpenDriveSignalOrientation(AttrS(SigNode, TEXT("orientation")));
+				Sig.Country = AttrS(SigNode, TEXT("country"));
+				Sig.Type = AttrS(SigNode, TEXT("type"));
+				Sig.Subtype = AttrS(SigNode, TEXT("subtype"));
+				Sig.Value = AttrD(SigNode, TEXT("value"));
+				Sig.Unit = AttrS(SigNode, TEXT("unit"));
+				Sig.Height = AttrD(SigNode, TEXT("height"));
+				Sig.Width = AttrD(SigNode, TEXT("width"));
+				Sig.Text = AttrS(SigNode, TEXT("text"));
+				Sig.HOffset = AttrD(SigNode, TEXT("hOffset"));
+				Sig.Pitch = AttrD(SigNode, TEXT("pitch"));
+				Sig.Roll = AttrD(SigNode, TEXT("roll"));
+				Road.Signals.Add(MoveTemp(Sig));
+			}
+			Road.Signals.Sort([](const FOpenDriveSignal& A, const FOpenDriveSignal& B) { return A.S < B.S; });
+		}
+
+		if (const FXmlNode* Objects = ODRXml::Child(RoadNode, TEXT("objects")))
+		{
+			for (const FXmlNode* ObjNode : ODRXml::Children(Objects, TEXT("object")))
+			{
+				FOpenDriveObject Obj;
+				Obj.Id = AttrS(ObjNode, TEXT("id"));
+				Obj.Name = AttrS(ObjNode, TEXT("name"));
+				Obj.Type = AttrS(ObjNode, TEXT("type"));
+				Obj.S = AttrD(ObjNode, TEXT("s"));
+				Obj.T = AttrD(ObjNode, TEXT("t"));
+				Obj.ZOffset = AttrD(ObjNode, TEXT("zOffset"));
+				Obj.HOffset = AttrD(ObjNode, TEXT("hdg"));
+				Obj.Pitch = AttrD(ObjNode, TEXT("pitch"));
+				Obj.Roll = AttrD(ObjNode, TEXT("roll"));
+				Obj.Orientation = ParseOpenDriveSignalOrientation(AttrS(ObjNode, TEXT("orientation")));
+				Obj.Length = AttrD(ObjNode, TEXT("length"));
+				Obj.Width = AttrD(ObjNode, TEXT("width"));
+				Obj.Height = AttrD(ObjNode, TEXT("height"));
+				Obj.Radius = AttrD(ObjNode, TEXT("radius"));
+				Road.Objects.Add(MoveTemp(Obj));
+			}
+			Road.Objects.Sort([](const FOpenDriveObject& A, const FOpenDriveObject& B) { return A.S < B.S; });
+		}
+
 		if (Road.Geometry.Num() == 0)
 		{
-			UE_LOG(LogOpenScenario, Warning, TEXT("OpenDRIVE road '%s' has no geometry and is ignored."), *Road.Id);
+			UE_LOG(LogOpenDrive, Warning, TEXT("OpenDRIVE road '%s' has no geometry and is ignored."), *Road.Id);
 			continue;
 		}
 		if (Road.Length <= 0.0)
@@ -353,12 +666,12 @@ bool FOpenDriveMap::LoadFromString(const FString& Xml, FString& OutError)
 		Roads.Add(MoveTemp(Road));
 	}
 
-	for (const FXmlNode* JuncNode : OSCXml::Children(Root, TEXT("junction")))
+	for (const FXmlNode* JuncNode : ODRXml::Children(Root, TEXT("junction")))
 	{
 		FOpenDriveJunction Junction;
 		Junction.Id = AttrS(JuncNode, TEXT("id"));
 		Junction.Name = AttrS(JuncNode, TEXT("name"));
-		for (const FXmlNode* ConNode : OSCXml::Children(JuncNode, TEXT("connection")))
+		for (const FXmlNode* ConNode : ODRXml::Children(JuncNode, TEXT("connection")))
 		{
 			FOpenDriveJunctionConnection Con;
 			Con.Id = AttrS(ConNode, TEXT("id"));
@@ -369,7 +682,7 @@ bool FOpenDriveMap::LoadFromString(const FString& Xml, FString& OutError)
 			{
 				Con.ContactPoint = EOpenDriveContactPoint::Start;
 			}
-			for (const FXmlNode* LL : OSCXml::Children(ConNode, TEXT("laneLink")))
+			for (const FXmlNode* LL : ODRXml::Children(ConNode, TEXT("laneLink")))
 			{
 				Con.LaneLinks.Emplace(FCString::Atoi(*AttrS(LL, TEXT("from"))), FCString::Atoi(*AttrS(LL, TEXT("to"))));
 			}
@@ -377,6 +690,34 @@ bool FOpenDriveMap::LoadFromString(const FString& Xml, FString& OutError)
 		}
 		JunctionIndex.Add(Junction.Id, Junctions.Num());
 		Junctions.Add(MoveTemp(Junction));
+	}
+
+	for (const FXmlNode* CtrlNode : ODRXml::Children(Root, TEXT("controller")))
+	{
+		FOpenDriveController Controller;
+		Controller.Id = AttrS(CtrlNode, TEXT("id"));
+		Controller.Name = AttrS(CtrlNode, TEXT("name"));
+		for (const FXmlNode* CtrlEntry : ODRXml::Children(CtrlNode, TEXT("control")))
+		{
+			FOpenDriveControllerEntry Entry;
+			Entry.SignalId = AttrS(CtrlEntry, TEXT("signalId"));
+			Entry.Type = AttrS(CtrlEntry, TEXT("type"));
+			Controller.Controls.Add(Entry);
+		}
+		Controllers.Add(MoveTemp(Controller));
+	}
+
+	for (const FXmlNode* GroupNode : ODRXml::Children(Root, TEXT("junctionGroup")))
+	{
+		FOpenDriveJunctionGroup Group;
+		Group.Id = AttrS(GroupNode, TEXT("id"));
+		Group.Name = AttrS(GroupNode, TEXT("name"));
+		Group.Type = AttrS(GroupNode, TEXT("type"));
+		for (const FXmlNode* RefNode : ODRXml::Children(GroupNode, TEXT("junctionReference")))
+		{
+			Group.JunctionRefs.Add(AttrS(RefNode, TEXT("junction")));
+		}
+		JunctionGroups.Add(MoveTemp(Group));
 	}
 
 	if (Roads.Num() == 0)
@@ -387,8 +728,29 @@ bool FOpenDriveMap::LoadFromString(const FString& Xml, FString& OutError)
 	return true;
 }
 
+void FOpenDriveMap::RebuildIndex()
+{
+	RoadIndex.Reset();
+	for (int32 i = 0; i < Roads.Num(); ++i)
+	{
+		ComputeRoadBounds(Roads[i]);
+		RoadIndex.Add(Roads[i].Id, i);
+	}
+	JunctionIndex.Reset();
+	for (int32 i = 0; i < Junctions.Num(); ++i)
+	{
+		JunctionIndex.Add(Junctions[i].Id, i);
+	}
+}
+
 void FOpenDriveMap::ComputeRoadBounds(FOpenDriveRoad& Road) const
 {
+	if (Road.Geometry.Num() == 0)
+	{
+		Road.MinX = Road.MaxX = Road.MinY = Road.MaxY = Road.MaxExtent = 0.0;
+		return;
+	}
+
 	bool bFirst = true;
 	double MaxExtent = 0.0;
 	const int32 N = FMath::Max(1, FMath::CeilToInt(Road.Length / 5.0));
@@ -422,6 +784,12 @@ double FOpenDriveMap::GetTotalLength() const
 	return Sum;
 }
 
+FOpenDriveRoad* FOpenDriveMap::FindRoadMutable(const FString& RoadId)
+{
+	const int32* Idx = RoadIndex.Find(RoadId);
+	return Idx ? &Roads[*Idx] : nullptr;
+}
+
 const FOpenDriveRoad* FOpenDriveMap::FindRoad(const FString& RoadId) const
 {
 	const int32* Idx = RoadIndex.Find(RoadId);
@@ -432,6 +800,28 @@ const FOpenDriveJunction* FOpenDriveMap::FindJunction(const FString& JunctionId)
 {
 	const int32* Idx = JunctionIndex.Find(JunctionId);
 	return Idx ? &Junctions[*Idx] : nullptr;
+}
+
+const FOpenDriveController* FOpenDriveMap::FindController(const FString& ControllerId) const
+{
+	for (const FOpenDriveController& Controller : Controllers)
+	{
+		if (Controller.Id == ControllerId)
+		{
+			return &Controller;
+		}
+	}
+	return nullptr;
+}
+
+FOpenDriveJunctionGroup* FOpenDriveMap::FindJunctionGroupMutable(const FString& JunctionGroupId)
+{
+	return JunctionGroups.FindByPredicate([&](const FOpenDriveJunctionGroup& G) { return G.Id == JunctionGroupId; });
+}
+
+const FOpenDriveJunctionGroup* FOpenDriveMap::FindJunctionGroup(const FString& JunctionGroupId) const
+{
+	return JunctionGroups.FindByPredicate([&](const FOpenDriveJunctionGroup& G) { return G.Id == JunctionGroupId; });
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -464,16 +854,88 @@ void FOpenDriveMap::EvaluateReferenceLine(const FOpenDriveRoad& Road, double S, 
 	EvalGeometry(G, S - G.S, X, Y, Heading);
 }
 
+double FOpenDriveMap::GetSuperelevation(const FOpenDriveRoad& Road, double S) const
+{
+	return FOpenDriveCubic::EvalPiecewise(Road.Superelevation, S);
+}
+
+double FOpenDriveMap::GetCrossfallAngle(const FOpenDriveRoad& Road, double S, bool bLeftSide) const
+{
+	if (Road.Crossfall.Num() == 0)
+	{
+		return 0.0;
+	}
+	const EOpenDriveCrossfallSide Wanted = bLeftSide ? EOpenDriveCrossfallSide::Left : EOpenDriveCrossfallSide::Right;
+	int32 Best = INDEX_NONE;
+	for (int32 i = 0; i < Road.Crossfall.Num(); ++i)
+	{
+		const FOpenDriveCrossfallEntry& Entry = Road.Crossfall[i];
+		if (Entry.Cubic.S <= S + 1e-9 && (Entry.Side == Wanted || Entry.Side == EOpenDriveCrossfallSide::Both))
+		{
+			Best = i;
+		}
+	}
+	return Best != INDEX_NONE ? Road.Crossfall[Best].Cubic.Eval(S) : 0.0;
+}
+
+double FOpenDriveMap::GetShapeZ(const FOpenDriveRoad& Road, double S, double T) const
+{
+	if (Road.Shape.Num() == 0)
+	{
+		return 0.0;
+	}
+	// Shape.Num() > 0 is sorted by (S, T). Find the last row-group whose S <= the query S (first group if none).
+	int32 GroupStart = 0, GroupEnd = 0;
+	int32 i = 0;
+	while (i < Road.Shape.Num())
+	{
+		int32 j = i;
+		const double GroupS = Road.Shape[i].S;
+		while (j < Road.Shape.Num() && FMath::Abs(Road.Shape[j].S - GroupS) < 1e-9)
+		{
+			++j;
+		}
+		if (GroupS <= S + 1e-9)
+		{
+			GroupStart = i;
+			GroupEnd = j - 1;
+		}
+		else
+		{
+			break;
+		}
+		i = j;
+	}
+	// Within the group (ascending T), the last row with T <= the query T applies (first row if none).
+	int32 Best = GroupStart;
+	for (int32 k = GroupStart; k <= GroupEnd; ++k)
+	{
+		if (Road.Shape[k].T <= T + 1e-9)
+		{
+			Best = k;
+		}
+		else
+		{
+			break;
+		}
+	}
+	return Road.Shape[Best].Eval(T);
+}
+
 FOpenDrivePose FOpenDriveMap::EvaluatePose(const FOpenDriveRoad& Road, double S, double T) const
 {
 	S = FMath::Clamp(S, 0.0, Road.Length);
 	double X, Y, H;
 	EvaluateReferenceLine(Road, S, X, Y, H);
 
+	// Superelevation banks the whole cross-section; crossfall (usually used instead, on straights, for
+	// drainage) can differ per side. Shape is an additional, t-dependent "road carving" term on top.
+	const double Bank = Road.Superelevation.Num() > 0 ? GetSuperelevation(Road, S) : GetCrossfallAngle(Road, S, T >= 0.0);
+
 	FOpenDrivePose Pose;
 	Pose.X = X - T * FMath::Sin(H);
 	Pose.Y = Y + T * FMath::Cos(H);
-	Pose.Z = FOpenDriveCubic::EvalPiecewise(Road.Elevation, S);
+	Pose.Z = FOpenDriveCubic::EvalPiecewise(Road.Elevation, S) + T * FMath::Sin(Bank) + GetShapeZ(Road, S, T);
 	Pose.Heading = H;
 	return Pose;
 }

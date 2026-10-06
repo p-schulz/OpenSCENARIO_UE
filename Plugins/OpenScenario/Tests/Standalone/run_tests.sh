@@ -1,52 +1,58 @@
 #!/usr/bin/env bash
-# Compiles the plugin's engine-independent runtime code against a tiny mock of the Unreal core types
-# and runs the example scenarios headless. No Unreal Engine installation required.
+# Compiles the plugin's engine-independent runtime code against a tiny mock of the Unreal core types and
+# runs the example scenarios and tests headless. No Unreal Engine installation required.
 #
-# The OpenDRIVE data model (FOpenDriveMap/UOpenDriveAsset) is owned by the separate OpenDrive_UE plugin;
-# OpenScenarioRunner/OpenScenarioAsset/OpenScenarioModelEdit depend on it via the "OpenDrive" plugin
-# dependency in a real Unreal build. This standalone harness can't pull in a sibling repo, so it builds
-# against the frozen copy in OpenDriveVendor/ instead (see the comment at the top of OpenDriveMap.h there).
+# The OpenDRIVE data model (FOpenDriveMap/UOpenDriveAsset) is owned by the separate OpenDRIVE_UE plugin; in a
+# real Unreal build OpenScenario depends on it as a plugin. This harness builds against the vendored copy in
+# OpenDriveVendor/ instead (see the comment at the top of OpenDriveMap.h there). Re-sync it when the shared
+# model changes.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SRC="$HERE/../../Source/OpenScenario"
 ODR="$HERE/OpenDriveVendor"
 EX="$HERE/../../Examples"
-OUT="${TMPDIR:-/tmp}/osc_standalone_test"
+OUT="${TMPDIR:-/tmp}/osc_standalone"
+mkdir -p "$OUT"
 
-${CXX:-g++} -std=c++20 -Wall -Wextra -Wno-unused-parameter -Wno-misleading-indentation \
-  -I "$HERE/MockUE" -I "$SRC/Public" -I "$SRC/Private" -I "$ODR/Public" "$HERE/main.cpp" \
-  "$SRC/Private/OpenScenarioModule.cpp" "$ODR/Private/OpenDrive/OpenDriveMap.cpp" \
-  "$ODR/Private/OpenDrive/OpenDriveAsset.cpp" "$SRC/Private/Scenario/OpenScenarioParser.cpp" \
-  "$SRC/Private/Scenario/OpenScenarioAsset.cpp" "$SRC/Private/Scenario/OpenScenarioWriter.cpp" \
-  "$SRC/Private/Scenario/OpenScenarioModelEdit.cpp" "$SRC/Private/Simulation/OpenScenarioRunner.cpp" -o "$OUT"
+CXXFLAGS=(-std=c++20 -Wall -Wextra -Wno-unused-parameter -Wno-misleading-indentation
+  -I "$HERE/MockUE" -I "$SRC/Public" -I "$SRC/Private" -I "$ODR/Public" -I "$ODR/Private")
+LIB=("$SRC/Private/OpenScenarioModule.cpp" "$ODR/Private/OpenDriveModule.cpp"
+  "$ODR/Private/OpenDrive/OpenDriveMap.cpp" "$ODR/Private/OpenDrive/OpenDriveAsset.cpp" "$ODR/Private/OpenDriveWriter.cpp"
+  "$SRC/Private/Scenario/OpenScenarioParser.cpp" "$SRC/Private/Scenario/OpenScenarioAsset.cpp"
+  "$SRC/Private/Scenario/OpenScenarioWriter.cpp" "$SRC/Private/Scenario/OpenScenarioModelEdit.cpp"
+  "$SRC/Private/Simulation/OpenScenarioRunner.cpp")
 
-${CXX:-g++} -std=c++20 -Wall -Wextra -Wno-unused-parameter -Wno-misleading-indentation \
-  -I "$HERE/MockUE" -I "$SRC/Public" -I "$SRC/Private" -I "$ODR/Public" "$HERE/edit_test.cpp" \
-  "$SRC/Private/OpenScenarioModule.cpp" "$ODR/Private/OpenDrive/OpenDriveMap.cpp" \
-  "$ODR/Private/OpenDrive/OpenDriveAsset.cpp" "$SRC/Private/Scenario/OpenScenarioParser.cpp" \
-  "$SRC/Private/Scenario/OpenScenarioAsset.cpp" "$SRC/Private/Scenario/OpenScenarioWriter.cpp" \
-  "$SRC/Private/Scenario/OpenScenarioModelEdit.cpp" "$SRC/Private/Simulation/OpenScenarioRunner.cpp" -o "$OUT-edit"
+# Compile the library sources once (in parallel), then link every test against the objects.
+OBJS=()
+pids=()
+for f in "${LIB[@]}"; do
+  o="$OUT/$(basename "$f" .cpp).o"; OBJS+=("$o")
+  if [ ! -f "$o" ] || [ "$f" -nt "$o" ] || [ -n "$(find "$SRC/Public" "$ODR/Public" "$HERE/MockUE" -newer "$o" -name '*.h' -print -quit)" ]; then
+    ${CXX:-g++} "${CXXFLAGS[@]}" -c "$f" -o "$o" & pids+=($!)
+  fi
+done
+for p in "${pids[@]:-}"; do [ -n "$p" ] && wait "$p"; done
+
+TESTS=(main edit_test dynamics_test traffic_test signal_test)
+pids=()
+for t in "${TESTS[@]}"; do
+  [ -f "$HERE/$t.cpp" ] || continue
+  ${CXX:-g++} "${CXXFLAGS[@]}" "$HERE/$t.cpp" "${OBJS[@]}" -o "$OUT/$t" & pids+=($!)
+done
+for p in "${pids[@]}"; do wait "$p"; done
 
 echo "== JunctionRouting: routed left turn, ends on ReachPosition at ~28 s =="
-"$OUT" "$EX/JunctionRouting.xosc" 27 30
+"$OUT/main" "$EX/JunctionRouting.xosc" 27 30
 echo "== TrajectoryAndEvents: ends on StopTrigger at 12 s =="
-"$OUT" "$EX/TrajectoryAndEvents.xosc" 12 12.1
+"$OUT/main" "$EX/TrajectoryAndEvents.xosc" 12 12.1
 echo "== Round trip and storyboard edit operations =="
-"$OUT-edit" "$EX"
-${CXX:-g++} -std=c++20 -Wall -Wextra -Wno-unused-parameter -Wno-misleading-indentation \
-  -I "$HERE/MockUE" -I "$SRC/Public" -I "$SRC/Private" -I "$ODR/Public" "$HERE/dynamics_test.cpp" \
-  "$SRC/Private/OpenScenarioModule.cpp" "$ODR/Private/OpenDrive/OpenDriveMap.cpp" \
-  "$ODR/Private/OpenDrive/OpenDriveAsset.cpp" "$SRC/Private/Scenario/OpenScenarioParser.cpp" \
-  "$SRC/Private/Scenario/OpenScenarioAsset.cpp" "$SRC/Private/Scenario/OpenScenarioWriter.cpp" \
-  "$SRC/Private/Scenario/OpenScenarioModelEdit.cpp" "$SRC/Private/Simulation/OpenScenarioRunner.cpp" -o "$OUT-dynamics"
+"$OUT/edit_test" "$EX"
 echo "== Simple vehicle dynamics =="
-"$OUT-dynamics" "$EX"
-${CXX:-g++} -std=c++20 -Wall -Wextra -Wno-unused-parameter -Wno-misleading-indentation \
-  -I "$HERE/MockUE" -I "$SRC/Public" -I "$SRC/Private" "$HERE/traffic_test.cpp" \
-  "$SRC/Private/OpenScenarioModule.cpp" "$SRC/Private/OpenDrive/OpenDriveMap.cpp" \
-  "$SRC/Private/OpenDrive/OpenDriveAsset.cpp" "$SRC/Private/Scenario/OpenScenarioParser.cpp" \
-  "$SRC/Private/Scenario/OpenScenarioAsset.cpp" "$SRC/Private/Scenario/OpenScenarioWriter.cpp" \
-  "$SRC/Private/Scenario/OpenScenarioModelEdit.cpp" "$SRC/Private/Simulation/OpenScenarioRunner.cpp" -o "$OUT-traffic"
+"$OUT/dynamics_test" "$EX"
 echo "== Traffic generators =="
-"$OUT-traffic" "$EX"
+"$OUT/traffic_test" "$EX"
+if [ -x "$OUT/signal_test" ]; then
+  echo "== Traffic signals and signs =="
+  "$OUT/signal_test" "$EX"
+fi
 echo "All standalone tests passed."

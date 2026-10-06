@@ -1,11 +1,8 @@
-// Test-only vendored copy — see OpenDriveMap.h in the sibling Public directory for why this exists.
 #include "OpenDrive/OpenDriveAsset.h"
-#include "OpenScenarioCoordinates.h"
-#include "OpenScenarioModule.h"
-#if OSC_UE_AT_LEAST(5, 4)
-#include "UObject/AssetRegistryTagsContext.h"
-#endif
+#include "OpenDriveModule.h"
+#include "OpenDriveWriter.h"
 #include "UObject/UnrealType.h"
+#include "Misc/FileHelper.h"
 
 #if WITH_EDITORONLY_DATA
 #include "EditorFramework/AssetImportData.h"
@@ -41,8 +38,9 @@ void UOpenDriveAsset::Reparse()
 	else
 	{
 		ParseStatus = FString::Printf(TEXT("Error: %s"), *Error);
-		UE_LOG(LogOpenScenario, Warning, TEXT("OpenDRIVE asset '%s': %s"), *GetPathName(), *ParseStatus);
+		UE_LOG(LogOpenDrive, Warning, TEXT("OpenDRIVE asset '%s': %s"), *GetPathName(), *ParseStatus);
 	}
+	OnReparsed.Broadcast();
 }
 
 TArray<FString> UOpenDriveAsset::GetRoadIds() const
@@ -72,10 +70,23 @@ bool UOpenDriveAsset::GetRoadTransform(const FString& RoadId, double S, double T
 		return false;
 	}
 	const FOpenDrivePose Pose = Map->EvaluatePose(*Road, S, T);
+	// ASAM frame: right-handed, Z up, X forward, Y left, metres. Unreal: left-handed, Z up, Y right, centimetres.
 	OutTransform = FTransform(
-		FRotator(0.0, OpenScenarioCoords::HeadingToYawDegrees(Pose.Heading), 0.0),
-		OpenScenarioCoords::ToUnrealLocation(Pose.X, Pose.Y, Pose.Z));
+		FRotator(0.0, -FMath::RadiansToDegrees(Pose.Heading), 0.0),
+		FVector(Pose.X * 100.0, -Pose.Y * 100.0, Pose.Z * 100.0));
 	return true;
+}
+
+void UOpenDriveAsset::ApplyMap(const FOpenDriveMap& NewMap)
+{
+	SourceXml = FOpenDriveWriter::Write(NewMap);
+	Reparse();
+}
+
+bool UOpenDriveAsset::ExportToFile(const FString& Filename) const
+{
+	const FString Xml = Map.IsValid() ? FOpenDriveWriter::Write(*Map) : SourceXml;
+	return FFileHelper::SaveStringToFile(Xml, *Filename, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
 }
 
 void UOpenDriveAsset::PostInitProperties()
@@ -98,7 +109,7 @@ void UOpenDriveAsset::PostLoad()
 	}
 }
 
-#if OSC_UE_AT_LEAST(5, 4)
+#if ODR_UE_AT_LEAST(5, 4)
 void UOpenDriveAsset::GetAssetRegistryTags(FAssetRegistryTagsContext Context) const
 {
 #if WITH_EDITORONLY_DATA

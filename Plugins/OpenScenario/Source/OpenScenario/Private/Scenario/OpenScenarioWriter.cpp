@@ -353,6 +353,26 @@ namespace
 			return true;
 		}
 
+		case EOSCActionType::TrafficSignalState:
+			X.Open(TEXT("GlobalAction"));
+			X.Open(TEXT("InfrastructureAction"));
+			X.Open(TEXT("TrafficSignalAction"));
+			X.Leaf(TEXT("TrafficSignalStateAction"), FAttrs().S(TEXT("name"), A.SignalId).S(TEXT("state"), A.SignalState));
+			X.Close(TEXT("TrafficSignalAction"));
+			X.Close(TEXT("InfrastructureAction"));
+			X.Close(TEXT("GlobalAction"));
+			return true;
+
+		case EOSCActionType::TrafficSignalController:
+			X.Open(TEXT("GlobalAction"));
+			X.Open(TEXT("InfrastructureAction"));
+			X.Open(TEXT("TrafficSignalAction"));
+			X.Leaf(TEXT("TrafficSignalControllerAction"), FAttrs().S(TEXT("trafficSignalControllerRef"), A.ControllerRef).S(TEXT("phase"), A.ControllerPhase));
+			X.Close(TEXT("TrafficSignalAction"));
+			X.Close(TEXT("InfrastructureAction"));
+			X.Close(TEXT("GlobalAction"));
+			return true;
+
 		case EOSCActionType::Unsupported:
 		default:
 			return false;
@@ -433,6 +453,11 @@ namespace
 		case EOSCConditionType::StoryboardElementState:
 			X.Open(TEXT("ByValueCondition"));
 			X.Leaf(TEXT("StoryboardElementStateCondition"), FAttrs().S(TEXT("storyboardElementType"), C.ElementType).S(TEXT("storyboardElementRef"), C.ElementRef).S(TEXT("state"), C.ElementState));
+			X.Close(TEXT("ByValueCondition"));
+			break;
+		case EOSCConditionType::TrafficSignal:
+			X.Open(TEXT("ByValueCondition"));
+			X.Leaf(TEXT("TrafficSignalCondition"), FAttrs().S(TEXT("name"), C.SignalId).S(TEXT("state"), C.SignalState));
 			X.Close(TEXT("ByValueCondition"));
 			break;
 		case EOSCConditionType::Parameter:
@@ -560,14 +585,36 @@ FString FOpenScenarioWriter::Write(const FOSCScenario& S)
 	}
 
 	X.Leaf(TEXT("CatalogLocations"));
-	if (S.RoadNetworkFile.IsEmpty())
+	if (S.RoadNetworkFile.IsEmpty() && S.SignalControllers.Num() == 0)
 	{
 		X.Leaf(TEXT("RoadNetwork"));
 	}
 	else
 	{
 		X.Open(TEXT("RoadNetwork"));
-		X.Leaf(TEXT("LogicFile"), FAttrs().S(TEXT("filepath"), S.RoadNetworkFile));
+		if (!S.RoadNetworkFile.IsEmpty())
+		{
+			X.Leaf(TEXT("LogicFile"), FAttrs().S(TEXT("filepath"), S.RoadNetworkFile));
+		}
+		if (S.SignalControllers.Num() > 0)
+		{
+			X.Open(TEXT("TrafficSignals"));
+			for (const FOSCSignalController& Ctrl : S.SignalControllers)
+			{
+				X.Open(TEXT("TrafficSignalController"), FAttrs().S(TEXT("name"), Ctrl.Name).D(TEXT("delay"), Ctrl.Delay));
+				for (const FOSCSignalPhase& Phase : Ctrl.Phases)
+				{
+					X.Open(TEXT("Phase"), FAttrs().S(TEXT("name"), Phase.Name).D(TEXT("duration"), Phase.Duration));
+					for (const FOSCSignalStateEntry& St : Phase.States)
+					{
+						X.Leaf(TEXT("TrafficSignalState"), FAttrs().S(TEXT("trafficSignalId"), St.SignalId).S(TEXT("state"), St.State));
+					}
+					X.Close(TEXT("Phase"));
+				}
+				X.Close(TEXT("TrafficSignalController"));
+			}
+			X.Close(TEXT("TrafficSignals"));
+		}
 		X.Close(TEXT("RoadNetwork"));
 	}
 

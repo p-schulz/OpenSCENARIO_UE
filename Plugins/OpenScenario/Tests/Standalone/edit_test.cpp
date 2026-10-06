@@ -85,7 +85,7 @@ int main(int argc, char** argv)
 		CHECK(T0 > 0 && std::fabs(T0 - T1) < 0.05);
 	}
 
-	for (const char* File : { "PopulatedWorld.xosc", "TrafficSourceSink.xosc" })
+	for (const char* File : { "PopulatedWorld.xosc", "TrafficSourceSink.xosc", "SignalsTrafficLight.xosc", "SignalsController.xosc" })
 	{
 		std::printf("== round trip (traffic) %s\n", File);
 		FOSCScenario A, B;
@@ -99,7 +99,15 @@ int main(int argc, char** argv)
 		int32 TrafficA = 0, TrafficB = 0;
 		for (const FOSCInitActions& G : A.InitActions) { for (const FOSCAction& X : G.Actions) { TrafficA += X.Type == EOSCActionType::Traffic; } }
 		for (const FOSCInitActions& G : B.InitActions) { for (const FOSCAction& X : G.Actions) { TrafficB += X.Type == EOSCActionType::Traffic; } }
-		CHECK(TrafficA >= 1 && TrafficA == TrafficB);
+		const bool bSignalFile = FString(File).StartsWith(TEXT("Signals"));
+		CHECK(TrafficA >= 1 || bSignalFile);
+		CHECK(TrafficA == TrafficB);
+		CHECK(A.SignalControllers.Num() == B.SignalControllers.Num());
+		if (FString(File) == "SignalsController.xosc")
+		{
+			CHECK(B.SignalControllers.Num() == 1 && B.SignalControllers[0].Phases.Num() == 2 && B.SignalControllers[0].Phases[0].States.Num() == 1);
+			CHECK(B.SignalControllers[0].Phases[0].Duration == 12.0);
+		}
 	}
 
 	std::printf("== edit operations\n");

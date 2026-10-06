@@ -1,8 +1,7 @@
-// Test-only vendored copy — see OpenDriveMap.h in this same directory for why this exists.
 #pragma once
 
 #include "CoreMinimal.h"
-#include "OpenScenarioVersion.h"
+#include "OpenDriveVersion.h"
 #include "UObject/Object.h"
 #include "OpenDrive/OpenDriveMap.h"
 #include "OpenDriveAsset.generated.h"
@@ -10,11 +9,13 @@
 class UAssetImportData;
 
 /**
- * An imported ASAM OpenDRIVE (.xodr) road network. The XML is stored inside the asset so packaged
- * builds do not depend on the original file; it is parsed into an FOpenDriveMap on load.
+ * An ASAM OpenDRIVE (.xodr) road network: imported from a file, created from scratch in the OpenDRIVE
+ * editor tool mode, or both. The XML is stored inside the asset so packaged builds do not depend on the
+ * original file; it is parsed into an FOpenDriveMap on load. This is the single OpenDRIVE data model
+ * shared with other plugins (e.g. OpenScenario_UE) that reference road networks.
  */
 UCLASS(BlueprintType)
-class OPENSCENARIO_API UOpenDriveAsset : public UObject
+class OPENDRIVE_API UOpenDriveAsset : public UObject
 {
 	GENERATED_BODY()
 
@@ -67,10 +68,19 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "OpenDRIVE")
 	bool GetRoadTransform(const FString& RoadId, double S, double T, FTransform& OutTransform) const;
 
+	/** Writes a new working map (e.g. from the OpenDRIVE editor tool mode), regenerating SourceXml from it. */
+	void ApplyMap(const FOpenDriveMap& NewMap);
+
+	/** Serialises the current map to an .xodr file on disk. */
+	bool ExportToFile(const FString& Filename) const;
+
+	/** Broadcast after every (re)parse, e.g. so editor tools can refresh. */
+	FSimpleMulticastDelegate OnReparsed;
+
 	//~ UObject
 	virtual void PostInitProperties() override;
 	virtual void PostLoad() override;
-#if OSC_UE_AT_LEAST(5, 4)
+#if ODR_UE_AT_LEAST(5, 4)
 	virtual void GetAssetRegistryTags(FAssetRegistryTagsContext Context) const override;
 #else
 	virtual void GetAssetRegistryTags(TArray<FAssetRegistryTag>& OutTags) const override;
