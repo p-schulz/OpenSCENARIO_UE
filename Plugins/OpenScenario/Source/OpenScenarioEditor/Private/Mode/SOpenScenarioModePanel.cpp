@@ -3,9 +3,9 @@
 #include "Authoring/OpenScenarioEditorSettings.h"
 #include "Authoring/SOpenScenarioTransportBar.h"
 #include "OpenDrive/OpenDriveAsset.h"
-#include "OpenScenarioEditorModule.h"
 #include "OpenDriveEditorContext.h"
 #include "OpenDriveEditorModule.h"
+#include "OpenScenarioEditorModule.h"
 #include "Scenario/OpenScenarioAsset.h"
 #include "AssetRegistry/AssetData.h"
 #include "DesktopPlatformModule.h"
@@ -115,19 +115,21 @@ void SOpenScenarioModePanel::Construct(const FArguments& InArgs, FOpenScenarioEd
 					]
 					+ SWrapBox::Slot().Padding(0.f, 0.f, 4.f, 4.f)
 					[
-						MakeButton(LOCTEXT("EditRoad", "Edit Road Network"), LOCTEXT("EditRoadTip", "Open the scenario's OpenDRIVE road network in the OpenDRIVE plugin's Road List"),
+						MakeButton(LOCTEXT("EditRoadNetwork", "Edit Road Network"), LOCTEXT("EditRoadNetworkTip", "Open the scenario's road network in the OpenDRIVE editor mode (Road List / Elevation / Superelevation tabs)"),
 							[Ctx]()
 							{
-								UOpenScenarioAsset* A = Ctx->GetAsset();
-								if (A && A->RoadNetwork)
+								if (UOpenScenarioAsset* Asset = Ctx->GetAsset())
 								{
-									FOpenDriveEditorModule& RoadEditor = FOpenDriveEditorModule::Get();
-									RoadEditor.GetContext().SetAsset(A->RoadNetwork);
-									RoadEditor.OpenRoadListTab();
+									if (UOpenDriveAsset* Road = Asset->RoadNetwork)
+									{
+										FOpenDriveEditorModule& OpenDrive = FOpenDriveEditorModule::Get();
+										OpenDrive.GetContext().SetAsset(Road);
+										OpenDrive.OpenRoadListTab();
+									}
 								}
 								return FReply::Handled();
 							},
-							[Ctx]() { return Ctx->GetAsset() && Ctx->GetAsset()->RoadNetwork; })
+							[Ctx]() { return Ctx->GetAsset() && Ctx->GetAsset()->RoadNetwork != nullptr; })
 					]
 					+ SWrapBox::Slot().Padding(0.f, 0.f, 4.f, 4.f)
 					[

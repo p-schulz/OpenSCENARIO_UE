@@ -15,12 +15,6 @@
 	"IsBetaVersion": true,
 	"IsExperimentalVersion": false,
 	"Installed": false,
-	"Plugins": [
-		{
-			"Name": "OpenDrive",
-			"Enabled": true
-		}
-	],
 	"Modules": [
 		{
 			"Name": "OpenScenario",
@@ -31,6 +25,12 @@
 			"Name": "OpenScenarioEditor",
 			"Type": "Editor",
 			"LoadingPhase": "Default"
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "OpenDrive",
+			"Enabled": true
 		}
 	]
 }

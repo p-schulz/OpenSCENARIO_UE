@@ -34,3 +34,6 @@ public:
 
 	virtual UObject* FactoryCreateNew(UClass* InClass, UObject* InParent, FName InName, EObjectFlags Flags, UObject* Context, FFeedbackContext* Warn) override;
 };
+
+// .xodr import is handled by the OpenDrive plugin's UOpenDriveImportFactory, which this plugin now
+// depends on instead of carrying its own copy.

@@ -1,7 +1,6 @@
 // Minimal stand-in for the subset of Unreal Engine used by the plugin's runtime code (test only).
 #pragma once
 #include <string>
-#include <type_traits>
 #include <random>
 #include <vector>
 #include <deque>
@@ -19,11 +18,11 @@
 #include <fstream>
 #include <sstream>
 #include <cctype>
+#include <type_traits>
 
 typedef char TCHAR;
 #define TEXT(x) x
 #define OPENSCENARIO_API
-#define OPENDRIVE_API
 typedef int32_t int32; typedef int64_t int64; typedef uint8_t uint8; typedef uint32_t uint32;
 #define INDEX_NONE (-1)
 #define MAX_int32 INT32_MAX
@@ -72,9 +71,6 @@ public:
 	FString Mid(int32 start, int32 count = INT32_MAX) const { if (start >= Len()) return FString(); return FString(S.substr(start, count)); }
 	FString TrimStartAndEnd() const { size_t a = S.find_first_not_of(" \t\r\n"); if (a == std::string::npos) return FString(); size_t b = S.find_last_not_of(" \t\r\n"); return FString(S.substr(a, b - a + 1)); }
 	FString ToLower() const { std::string r = S; for (auto& c : r) c = (char)std::tolower((unsigned char)c); return FString(r); }
-	void ReplaceInline(const char* from, const char* to) { *this = Replace(from, to); }
-	bool FindChar(char c, int32& OutIndex) const { size_t p = S.find(c); if (p == std::string::npos) return false; OutIndex = (int32)p; return true; }
-	FString Left(int32 count) const { const int32 N = count < 0 ? 0 : (count > (int32)S.size() ? (int32)S.size() : count); return FString(S.substr(0, N)); }
 	FString Replace(const char* from, const char* to) const { std::string r = S, f = from, t = to; size_t p = 0; while ((p = r.find(f, p)) != std::string::npos) { r.replace(p, f.size(), t); p += t.size(); } return FString(r); }
 	FString operator+(const FString& o) const { return FString(S + o.S); }
 	FString& operator+=(const FString& o) { S += o.S; return *this; }
@@ -105,17 +101,21 @@ public:
 	const T& operator[](int32 i) const { return V[i]; }
 	auto begin() { return V.begin(); } auto end() { return V.end(); }
 	auto begin() const { return V.begin(); } auto end() const { return V.end(); }
-	// Real UE dereferences pointer elements before calling the predicate (TDereferenceWrapper).
+	// Real UE dereferences pointer elements before calling the predicate (TDereferenceWrapper in
+	// Templates/Sorting.h), so a TArray<T*>::Sort predicate must take T&, not T*. Mirror that here so a
+	// predicate written for the wrong (pointer) signature fails in this harness too, not only in a real
+	// UE build.
 	template <class P> void Sort(P p)
 	{
-		if constexpr (std::is_pointer<T>::value) { std::stable_sort(V.begin(), V.end(), [&p](T A, T B) { return p(*A, *B); }); }
-		else { std::stable_sort(V.begin(), V.end(), p); }
+		if constexpr (std::is_pointer<T>::value)
+		{
+			std::stable_sort(V.begin(), V.end(), [&p](T A, T B) { return p(*A, *B); });
+		}
+		else
+		{
+			std::stable_sort(V.begin(), V.end(), p);
+		}
 	}
-	template <class P> int32 IndexOfByPredicate(P p) const { for (size_t i = 0; i < V.size(); ++i) if (p(V[i])) return (int32)i; return INDEX_NONE; }
-	template <class P> const T* FindByPredicate(P p) const { for (auto& x : V) if (p(x)) return &x; return nullptr; }
-	template <class P> T* FindByPredicate(P p) { for (auto& x : V) if (p(x)) return &x; return nullptr; }
-	template <class P> int32 RemoveAll(P p) { int32 n = 0; for (size_t i = 0; i < V.size();) { if (p(V[i])) { V.erase(V.begin() + i); ++n; } else { ++i; } } return n; }
-	int32 AddUnique(const T& t) { if (Contains(t)) return IndexOfByPredicate([&](const T& x) { return x == t; }); return Add(t); }
 	int32 AddDefaulted() { V.emplace_back(); return Num() - 1; }
 	void RemoveAt(int32 i, int32 n = 1) { V.erase(V.begin() + i, V.begin() + i + n); }
 	void Insert(const T& t, int32 i) { V.insert(V.begin() + i, t); }
@@ -150,7 +150,6 @@ public:
 	void Reset() { P.reset(); }
 	T* Get() const { return P.get(); }
 	T* operator->() const { return P.get(); }
-	T& operator*() const { return *P.get(); }
 };
 template <class T, class... A> TSharedPtr<T> MakeShared(A&&... a) { return TSharedPtr<T>(std::make_shared<T>(std::forward<A>(a)...)); }
 
@@ -219,9 +218,7 @@ struct FPaths {
 	static FString ProjectDir() { return "/nonexistent_project/"; } static FString ProjectContentDir() { return "/nonexistent_project/Content/"; }
 	static bool FileExists(const FString& p) { return std::filesystem::is_regular_file(p.S); }
 };
-struct FFileHelper { enum class EEncodingOptions { AutoDetect, ForceAnsi, ForceUnicode, ForceUTF8, ForceUTF8WithoutBOM };
-	static bool SaveStringToFile(const FString& s, const char* path, EEncodingOptions = EEncodingOptions::AutoDetect) { std::ofstream f(path); if (!f) return false; f << s.S; return true; }
-	static bool LoadFileToString(FString& out, const char* path) { std::ifstream f(path); if (!f) return false; std::stringstream ss; ss << f.rdbuf(); out = FString(ss.str()); return true; } };
+struct FFileHelper { static bool LoadFileToString(FString& out, const char* path) { std::ifstream f(path); if (!f) return false; std::stringstream ss; ss << f.rdbuf(); out = FString(ss.str()); return true; } };
 struct IFileManager { static IFileManager& Get() { static IFileManager m; return m; }
 	void FindFiles(TArray<FString>& out, const char* pattern, bool, bool) { std::filesystem::path p(pattern); auto dir = p.parent_path(); auto ext = p.extension(); if (!std::filesystem::exists(dir)) return; for (auto& e : std::filesystem::directory_iterator(dir)) if (e.path().extension() == ext) out.Add(FString(e.path().filename().string())); } };
 class IModuleInterface { public: virtual ~IModuleInterface() {} virtual void StartupModule() {} virtual void ShutdownModule() {} };
