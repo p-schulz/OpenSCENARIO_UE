@@ -108,8 +108,6 @@ private:
 	TArray<FString> Issues;
 	uint32 IssuesRevision = MAX_uint32;
 	FDelegateHandle ReparsedHandle;
-	mutable TSharedPtr<const FOpenDriveMap> CachedMap;
-	mutable TWeakObjectPtr<UOpenScenarioAsset> CachedMapAsset;
 
 	mutable uint64 PlaybackCacheFrame = MAX_uint64;
 	mutable EOpenScenarioPlaybackState CachedPlaybackState = EOpenScenarioPlaybackState::Stopped;
