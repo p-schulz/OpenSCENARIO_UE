@@ -7,6 +7,7 @@
 #include "OpenDrive/OpenDriveMap.h"
 #include "Scenario/OpenScenarioModel.h"
 #include "Simulation/OpenScenarioDynamics.h"
+#include "Simulation/OpenScenarioSignals.h"
 #include "OpenScenarioRunner.generated.h"
 
 class UOpenScenarioAsset;
@@ -22,8 +23,17 @@ struct FLookAheadSample
 	double Y = 0.0;
 };
 
+/** A signal on the planned path that may require the vehicle to stop. */
+struct FLookAheadControl
+{
+	/** Distance from the start of the path (m). */
+	double Dist = 0.0;
+	int32 Signal = INDEX_NONE;
+};
+
 struct FLookAheadCache
 {
+	TArray<FLookAheadControl> Controls;
 	bool bValid = false;
 	double TravelledAtBuild = 0.0;
 	double TimeBuilt = 0.0;
@@ -65,6 +75,12 @@ struct OPENSCENARIO_API FOSCEntityState
 	// Route (road-level), see AssignRouteAction
 	TArray<FOpenDriveRouteStep> Route;
 	int32 RouteIndex = 0;
+
+	/** Signals (stop/give way) already dealt with, so they are not applied again. */
+	TArray<int32> HandledSignals;
+	double StopDwell = 0.0;
+	/** Speed limit (m/s) of the last speed-limit sign passed, negative if none. */
+	double SignLimit = -1.0;
 
 	/** False for traffic actors that have been removed; their slot is reused. */
 	bool bActive = true;
@@ -109,6 +125,38 @@ struct FOSCActionInstance
 	bool bPathTimed = false;
 };
 
+enum class EOSCSignalKind : uint8
+{
+	Other,
+	TrafficLight,
+	Stop,
+	Yield,
+	SpeedLimit,
+	EndSpeedLimit
+};
+
+/** An OpenDRIVE signal as seen by the simulation. */
+struct FRuntimeSignal
+{
+	FString Id;
+	FString RoadId;
+	double S = 0.0;
+	double T = 0.0;
+	EOpenDriveSignalOrientation Orientation = EOpenDriveSignalOrientation::None;
+	EOSCSignalKind Kind = EOSCSignalKind::Other;
+	/** m/s for speed-limit signs. */
+	double SpeedLimit = -1.0;
+	EOpenScenarioSignalState State = EOpenScenarioSignalState::Off;
+	int32 Group = INDEX_NONE;
+	/** True while a scenario action or signal controller drives the state. */
+	bool bManual = false;
+	/** Junction the signal regulates entry to (empty if none). */
+	FString JunctionId;
+	/** World position (OpenSCENARIO frame, metres). */
+	double X = 0.0, Y = 0.0, Z = 0.0;
+};
+
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOpenScenarioSignalChangedNative, const FString& /*SignalId*/, EOpenScenarioSignalState /*NewState*/);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOpenScenarioEntitySpawnedNative, const FString& /*EntityName*/, AActor* /*Actor*/);
 DECLARE_MULTICAST_DELEGATE(FOpenScenarioFinishedNative);
 
@@ -142,6 +190,7 @@ public:
 	/** Vehicle/driver model parameters. */
 	FOpenScenarioDynamicsSettings Dynamics;
 	FOpenScenarioTrafficSettings TrafficSettings;
+	FOpenScenarioSignalSettings SignalSettings;
 
 	// --- Lifecycle ---------------------------------------------------------------------------
 	bool Initialize(UWorld* InWorld, UOpenScenarioAsset* InAsset);
@@ -156,11 +205,18 @@ public:
 	AActor* GetEntityActor(const FString& EntityName) const;
 	const FOSCEntityState* GetEntityState(const FString& EntityName) const;
 	const TArray<FOSCEntityState>& GetEntities() const { return Entities; }
+	const TArray<FRuntimeSignal>& GetSignals() const { return Signals; }
+	/** Current state of an OpenDRIVE signal by id; false if the signal does not exist. */
+	bool GetSignalState(const FString& SignalId, EOpenScenarioSignalState& OutState) const;
+	/** Overrides a signal's state (until a controller or action changes it again). */
+	bool SetSignalStateById(const FString& SignalId, EOpenScenarioSignalState State);
+
 	/** Number of currently active actors spawned by traffic generators. */
 	int32 GetTrafficCount() const;
 	TSharedPtr<const FOpenDriveMap> GetRoadNetwork() const { return Map; }
 
 	FOpenScenarioEntitySpawnedNative OnEntitySpawned;
+	FOpenScenarioSignalChangedNative OnSignalChanged;
 	FOpenScenarioFinishedNative OnFinished;
 
 private:
@@ -206,6 +262,41 @@ private:
 	void SetCommandedSpeed(FOSCEntityState& E, double Speed) const;
 	bool UsesSimpleDynamics(const FOSCEntityState& E) const;
 
+	// Traffic signals and signs
+	struct FSignalGroup
+	{
+		TArray<int32> Signals;
+		int32 Cluster = 0;
+		int32 IndexInCluster = 0;
+	};
+	struct FSignalCluster
+	{
+		TArray<int32> Groups;
+	};
+	struct FSignalControllerRuntime
+	{
+		const FOSCSignalController* Def = nullptr;
+		int32 Phase = 0;
+		double Elapsed = 0.0;
+	};
+	struct FRoadCursor
+	{
+		FString RoadId;
+		double S = 0.0;
+		int32 LaneId = 0;
+		bool bForward = true;
+		int32 RouteIndex = 0;
+	};
+	void BuildSignalTable();
+	void BuildSignalGroups();
+	void UpdateSignals(double Dt);
+	void ApplyControllerPhase(FSignalControllerRuntime& Ctrl);
+	void SetSignalState(int32 Index, EOpenScenarioSignalState State);
+	void StartSignalAction(const FOSCAction& Action);
+	bool JunctionOccupied(const FRuntimeSignal& Signal, const FOSCEntityState* Self) const;
+	void CollectSignalsBetween(const FRoadCursor& Before, const FRoadCursor& After, double BaseDist, TFunctionRef<void(int32, double)> Callback) const;
+	static EOpenScenarioSignalState ParseSignalState(const FString& Text);
+
 	// Traffic generators
 	struct FTrafficGenerator
 	{
@@ -240,14 +331,6 @@ private:
 	bool HasActiveGenerators() const;
 
 	// Simple vehicle dynamics
-	struct FRoadCursor
-	{
-		FString RoadId;
-		double S = 0.0;
-		int32 LaneId = 0;
-		bool bForward = true;
-		int32 RouteIndex = 0;
-	};
 	void UpdateDynamics(FOSCEntityState& E, double Dt);
 	void BuildLookAhead(FOSCEntityState& E, double Distance);
 	bool AdvanceCursor(FRoadCursor& Cursor, const TArray<FOpenDriveRouteStep>& Route, double Ds) const;
@@ -282,6 +365,12 @@ private:
 	TArray<FOSCEntityState> Entities;
 	TMap<FString, int32> EntityIndex;
 	TArray<FOSCActionInstance> Instances;
+	TArray<FRuntimeSignal> Signals;
+	TMap<FString, TArray<int32>> RoadSignals;
+	TMap<FString, int32> SignalById;
+	TArray<FSignalGroup> SignalGroups;
+	TArray<FSignalCluster> SignalClusters;
+	TArray<FSignalControllerRuntime> SignalControllers;
 	TArray<FTrafficGenerator> Generators;
 	TArray<FLaneSegment> LaneSegments;
 	TMap<int64, TArray<int32>> LaneGrid;

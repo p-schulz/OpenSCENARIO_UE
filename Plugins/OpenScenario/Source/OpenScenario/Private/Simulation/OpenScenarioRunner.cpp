@@ -9,6 +9,12 @@
 namespace
 {
 	constexpr double kPi = UE_DOUBLE_PI;
+
+	/** Global actions have no acting entity. */
+	bool IsGlobalAction(EOSCActionType Type)
+	{
+		return Type == EOSCActionType::Traffic || Type == EOSCActionType::TrafficSignalState || Type == EOSCActionType::TrafficSignalController;
+	}
 	/** Spacing of the look-ahead samples (m). */
 	constexpr double LookAheadStep = 2.0;
 
@@ -89,6 +95,7 @@ bool UOpenScenarioRunner::Initialize(UWorld* InWorld, UOpenScenarioAsset* InAsse
 	}
 
 	BuildElementIndex();
+	BuildSignalTable();
 
 	SimTime = 0.0;
 	CurrentDt = 0.0;
@@ -97,6 +104,7 @@ bool UOpenScenarioRunner::Initialize(UWorld* InWorld, UOpenScenarioAsset* InAsse
 	bFinished = false;
 
 	RunInitActions();
+	UpdateSignals(0.0);
 	UpdateStoryboard();
 	SyncActors();
 	return true;
@@ -294,6 +302,7 @@ void UOpenScenarioRunner::Step(double Dt)
 			UpdateInstance(Instances[i], Dt);
 		}
 	}
+	UpdateSignals(Dt);
 	UpdateStoryboard();
 
 	UpdateTraffic(Dt);
@@ -566,7 +575,7 @@ void UOpenScenarioRunner::StartEvent(FOSCManeuverGroup& MG, FOSCEvent& Ev)
 	Ev.Runtime.Instances.Reset();
 	for (FOSCAction& Action : Ev.Actions)
 	{
-		if (Action.Type == EOSCActionType::Traffic)
+		if (IsGlobalAction(Action.Type))
 		{
 			// Global action: one instance, independent of the maneuver group's actors.
 			Ev.Runtime.Instances.Add(CreateInstance(Action, FString()));
@@ -737,6 +746,11 @@ bool UOpenScenarioRunner::EvaluateRaw(const FOSCCondition& Cond)
 		return Compare(SimTime, Cond.Rule, Cond.Value);
 	case EOSCConditionType::StoryboardElementState:
 		return EvaluateElementState(Cond);
+	case EOSCConditionType::TrafficSignal:
+	{
+		EOpenScenarioSignalState State;
+		return GetSignalState(Cond.SignalId, State) && State == ParseSignalState(Cond.SignalState);
+	}
 	case EOSCConditionType::Parameter:
 	{
 		const FString* Value = Scenario.Parameters.Find(Cond.ParameterRef);
@@ -920,7 +934,7 @@ int32 UOpenScenarioRunner::CreateInstance(FOSCAction& Action, const FString& Ent
 	{
 		Inst.EntityIndex = *Idx;
 	}
-	else if (Action.Type == EOSCActionType::Traffic)
+	else if (IsGlobalAction(Action.Type))
 	{
 		// Global action without an acting entity.
 	}
@@ -1003,6 +1017,12 @@ void UOpenScenarioRunner::InitInstance(FOSCActionInstance& Inst)
 	if (A.Type == EOSCActionType::Traffic)
 	{
 		StartTrafficAction(A);
+		FinishInstance(Inst);
+		return;
+	}
+	if (A.Type == EOSCActionType::TrafficSignalState || A.Type == EOSCActionType::TrafficSignalController)
+	{
+		StartSignalAction(A);
 		FinishInstance(Inst);
 		return;
 	}
@@ -1562,8 +1582,27 @@ void UOpenScenarioRunner::UpdateMotion(FOSCEntityState& E, double Dt)
 
 	if (E.bOnRoad && Map.IsValid())
 	{
+		FRoadCursor Before;
+		Before.RoadId = E.RoadId;
+		Before.S = E.S;
+		Before.LaneId = E.LaneId;
+		Before.bForward = E.bDirForward;
 		AdvanceOnRoad(E, Ds);
 		UpdatePoseFromRoad(E);
+		if (Ds > 0.0 && E.bOnRoad && UsesSimpleDynamics(E))
+		{
+			FRoadCursor After;
+			After.RoadId = E.RoadId;
+			After.S = E.S;
+			After.LaneId = E.LaneId;
+			After.bForward = E.bDirForward;
+			CollectSignalsBetween(Before, After, 0.0, [&](int32 Index, double)
+			{
+				const FRuntimeSignal& Sig = Signals[Index];
+				if (Sig.Kind == EOSCSignalKind::SpeedLimit && SignalSettings.bObeySpeedSigns) { E.SignLimit = Sig.SpeedLimit; }
+				else if (Sig.Kind == EOSCSignalKind::EndSpeedLimit && SignalSettings.bObeySpeedSigns) { E.SignLimit = -1.0; }
+			});
+		}
 	}
 	else
 	{
@@ -1797,6 +1836,7 @@ void UOpenScenarioRunner::BuildLookAhead(FOSCEntityState& E, double Distance)
 	constexpr double Step = LookAheadStep;
 	FLookAheadCache& C = E.LookAhead;
 	C.Samples.Reset();
+	C.Controls.Reset();
 	C.bValid = true;
 	C.TravelledAtBuild = E.TravelledDistance;
 	C.TimeBuilt = SimTime;
@@ -1810,6 +1850,7 @@ void UOpenScenarioRunner::BuildLookAhead(FOSCEntityState& E, double Distance)
 		Cursor.LaneId = E.bLaneChanging ? E.LCTargetLane : E.LaneId;
 		Cursor.bForward = E.bDirForward;
 		Cursor.RouteIndex = E.RouteIndex;
+		double SignLimit = E.SignLimit;
 
 		// Samples lie on a fixed grid of travelled distance (plus one at the current position), so the
 		// look-ahead is stable when it is rebuilt while the vehicle moves.
@@ -1838,6 +1879,10 @@ void UOpenScenarioRunner::BuildLookAhead(FOSCEntityState& E, double Distance)
 					Limit = RoadLimit * Dynamics.SpeedLimitFactor;
 				}
 			}
+			if (SignLimit >= 0.0)
+			{
+				Limit = Limit < 0.0 ? SignLimit : FMath::Min(Limit, SignLimit);
+			}
 			if (Dynamics.bSlowInCurves)
 			{
 				const double K = FMath::Abs(Map->GetLaneCurvature(*Road, Cursor.S, Lane));
@@ -1857,7 +1902,25 @@ void UOpenScenarioRunner::BuildLookAhead(FOSCEntityState& E, double Distance)
 
 			const double NextD = bFirstSample ? FirstGrid : D + Step;
 			bFirstSample = false;
-			if (!AdvanceCursor(Cursor, E.Route, NextD - D))
+			const FRoadCursor Before = Cursor;
+			const bool bAdvanced = AdvanceCursor(Cursor, E.Route, NextD - D);
+			if (bAdvanced)
+			{
+				CollectSignalsBetween(Before, Cursor, D, [&](int32 Index, double Dist)
+				{
+					const FRuntimeSignal& Sig = Signals[Index];
+					if (Sig.Kind == EOSCSignalKind::SpeedLimit && SignalSettings.bObeySpeedSigns) { SignLimit = Sig.SpeedLimit; }
+					else if (Sig.Kind == EOSCSignalKind::EndSpeedLimit && SignalSettings.bObeySpeedSigns) { SignLimit = -1.0; }
+					else if (Sig.Kind == EOSCSignalKind::TrafficLight || Sig.Kind == EOSCSignalKind::Stop || Sig.Kind == EOSCSignalKind::Yield)
+					{
+						FLookAheadControl Control;
+						Control.Dist = Dist;
+						Control.Signal = Index;
+						C.Controls.Add(Control);
+					}
+				});
+			}
+			if (!bAdvanced)
 			{
 				// Dead end: plan to stand at the end of the road.
 				if (const FOpenDriveRoad* Last = Map->FindRoad(Cursor.RoadId))
@@ -2013,6 +2076,87 @@ void UOpenScenarioRunner::UpdateDynamics(FOSCEntityState& E, double Dt)
 		}
 		const double D = FMath::Max(0.0, Sample.Dist - Along - LookAheadStep);
 		VEnvelope = FMath::Min(VEnvelope, FMath::Sqrt(Sample.VLimit * Sample.VLimit + 2.0 * BComfort * D));
+	}
+
+	// Signals ahead: red lights, stop signs and give-way signs can force a stop at their line.
+	bool bDwelling = false;
+	const double FrontSelf = E.Def.CenterX + 0.5 * E.Def.Length;
+	for (const FLookAheadControl& Control : Cache.Controls)
+	{
+		const FRuntimeSignal& Sig = Signals[Control.Signal];
+		if (E.HandledSignals.Contains(Control.Signal))
+		{
+			continue;
+		}
+		const double ToLine = Control.Dist - Along - FrontSelf - SignalSettings.StopLineMargin;
+		if (ToLine < -1.0)
+		{
+			// The front bumper is past the line: nothing left to obey.
+			if (Sig.Kind != EOSCSignalKind::TrafficLight)
+			{
+				E.HandledSignals.Add(Control.Signal);
+			}
+			continue;
+		}
+		bool bMustStop = false;
+		switch (Sig.Kind)
+		{
+		case EOSCSignalKind::TrafficLight:
+			if (SignalSettings.bObeyTrafficLights)
+			{
+				if (Sig.State == EOpenScenarioSignalState::Red)
+				{
+					bMustStop = true;
+				}
+				else if (Sig.State == EOpenScenarioSignalState::Yellow)
+				{
+					// Stop if that is possible with comfortable braking, otherwise drive through.
+					bMustStop = ToLine > 0.0 && V * V / (2.0 * BComfort) <= ToLine + 0.5;
+				}
+			}
+			break;
+		case EOSCSignalKind::Stop:
+			if (SignalSettings.bObeyStopSigns)
+			{
+				bMustStop = true;
+				if (ToLine <= 0.5 && V < 0.2)
+				{
+					bDwelling = true;
+					E.StopDwell += Dt;
+					if (E.StopDwell >= SignalSettings.StopDwellTime && !JunctionOccupied(Sig, &E))
+					{
+						E.HandledSignals.Add(Control.Signal);
+						E.StopDwell = 0.0;
+						bMustStop = false;
+					}
+				}
+			}
+			break;
+		case EOSCSignalKind::Yield:
+			if (SignalSettings.bObeyYieldSigns)
+			{
+				if (JunctionOccupied(Sig, &E))
+				{
+					bMustStop = true;
+				}
+				else
+				{
+					const double D = FMath::Max(0.0, ToLine);
+					VEnvelope = FMath::Min(VEnvelope, FMath::Sqrt(FMath::Square(SignalSettings.YieldApproachSpeed) + 2.0 * BComfort * D));
+				}
+			}
+			break;
+		default:
+			break;
+		}
+		if (bMustStop)
+		{
+			VEnvelope = FMath::Min(VEnvelope, FMath::Sqrt(2.0 * BComfort * FMath::Max(0.0, ToLine)));
+		}
+	}
+	if (!bDwelling)
+	{
+		E.StopDwell = 0.0;
 	}
 
 	const double VTarget = FMath::Min(VDesired, VEnvelope);
@@ -2637,5 +2781,448 @@ void UOpenScenarioRunner::UpdateSink(FTrafficGenerator& G, double Dt)
 		}
 		DespawnEntity(i);
 		G.Accumulator -= 1.0;
+	}
+}
+
+// ---------------------------------------------------------------------------------------------
+// Traffic signals and signs
+// ---------------------------------------------------------------------------------------------
+
+EOpenScenarioSignalState UOpenScenarioRunner::ParseSignalState(const FString& Text)
+{
+	const FString T = Text.ToLower();
+	if (T.Contains(TEXT("red")) || T == TEXT("stop")) { return EOpenScenarioSignalState::Red; }
+	if (T.Contains(TEXT("yellow")) || T.Contains(TEXT("amber"))) { return EOpenScenarioSignalState::Yellow; }
+	if (T.Contains(TEXT("green")) || T == TEXT("go")) { return EOpenScenarioSignalState::Green; }
+	return EOpenScenarioSignalState::Off;
+}
+
+bool UOpenScenarioRunner::GetSignalState(const FString& SignalId, EOpenScenarioSignalState& OutState) const
+{
+	if (const int32* Index = SignalById.Find(SignalId))
+	{
+		OutState = Signals[*Index].State;
+		return true;
+	}
+	return false;
+}
+
+bool UOpenScenarioRunner::SetSignalStateById(const FString& SignalId, EOpenScenarioSignalState State)
+{
+	const int32* Index = SignalById.Find(SignalId);
+	if (!Index)
+	{
+		return false;
+	}
+	Signals[*Index].bManual = true;
+	SetSignalState(*Index, State);
+	return true;
+}
+
+void UOpenScenarioRunner::SetSignalState(int32 Index, EOpenScenarioSignalState State)
+{
+	FRuntimeSignal& Sig = Signals[Index];
+	if (Sig.State == State)
+	{
+		return;
+	}
+	Sig.State = State;
+	OnSignalChanged.Broadcast(Sig.Id, State);
+}
+
+void UOpenScenarioRunner::BuildSignalTable()
+{
+	Signals.Reset();
+	RoadSignals.Reset();
+	SignalById.Reset();
+	SignalGroups.Reset();
+	SignalClusters.Reset();
+	SignalControllers.Reset();
+	if (!Map.IsValid())
+	{
+		return;
+	}
+
+	auto Starts = [](const FString& Value, std::initializer_list<const TCHAR*> Prefixes)
+	{
+		for (const TCHAR* P : Prefixes)
+		{
+			if (Value.Equals(P, ESearchCase::IgnoreCase)) { return true; }
+		}
+		return false;
+	};
+
+	for (const FOpenDriveRoad& Road : Map->GetRoads())
+	{
+		for (const FOpenDriveSignal& Src : Road.Signals)
+		{
+			FRuntimeSignal Sig;
+			Sig.Id = Src.Id;
+			Sig.RoadId = Road.Id;
+			Sig.S = Src.S;
+			Sig.T = Src.T;
+			Sig.Orientation = Src.Orientation;
+
+			const bool bStop = Starts(Src.Type, { TEXT("206"), TEXT("stop"), TEXT("R1-1") });
+			const bool bYield = Starts(Src.Type, { TEXT("205"), TEXT("yield"), TEXT("giveway"), TEXT("R1-2") });
+			const bool bLimit = Starts(Src.Type, { TEXT("274"), TEXT("R2-1") });
+			const bool bEnd = Starts(Src.Type, { TEXT("278"), TEXT("280"), TEXT("282") });
+			bool bLight = false;
+			for (const FString& T : SignalSettings.TrafficLightTypes)
+			{
+				bLight |= Src.Type == T;
+			}
+			if (bStop) { Sig.Kind = EOSCSignalKind::Stop; }
+			else if (bYield) { Sig.Kind = EOSCSignalKind::Yield; }
+			else if (bLimit && Src.Value > 0.0)
+			{
+				Sig.Kind = EOSCSignalKind::SpeedLimit;
+				const FString Unit = Src.Unit.ToLower();
+				Sig.SpeedLimit = Unit == TEXT("mph") ? Src.Value * 0.44704 : (Unit == TEXT("m/s") ? Src.Value : Src.Value / 3.6);
+			}
+			else if (bEnd) { Sig.Kind = EOSCSignalKind::EndSpeedLimit; }
+			else if (bLight || (Src.bDynamic && Src.Type != TEXT("1000002") && Src.Type != TEXT("1000003")))
+			{
+				Sig.Kind = EOSCSignalKind::TrafficLight;
+			}
+
+			// Which junction does the signal regulate?
+			if (Road.IsJunctionRoad())
+			{
+				Sig.JunctionId = Road.JunctionId;
+			}
+			else
+			{
+				const bool bSucc = Road.SuccessorType == EOpenDriveElementType::Junction;
+				const bool bPred = Road.PredecessorType == EOpenDriveElementType::Junction;
+				if (Src.Orientation == EOpenDriveSignalOrientation::Plus && bSucc) { Sig.JunctionId = Road.SuccessorId; }
+				else if (Src.Orientation == EOpenDriveSignalOrientation::Minus && bPred) { Sig.JunctionId = Road.PredecessorId; }
+				else if (Src.Orientation == EOpenDriveSignalOrientation::None)
+				{
+					const bool bNearEnd = Src.S > 0.5 * Road.Length;
+					if (bNearEnd && bSucc) { Sig.JunctionId = Road.SuccessorId; }
+					else if (!bNearEnd && bPred) { Sig.JunctionId = Road.PredecessorId; }
+				}
+			}
+
+			const FOpenDrivePose Pose = Map->EvaluatePose(Road, Src.S, Src.T);
+			Sig.X = Pose.X;
+			Sig.Y = Pose.Y;
+			Sig.Z = Pose.Z + Src.ZOffset;
+
+			const int32 Index = Signals.Add(Sig);
+			RoadSignals.FindOrAdd(Road.Id).Add(Index);
+			if (!Src.Id.IsEmpty())
+			{
+				SignalById.Add(Src.Id, Index);
+			}
+		}
+	}
+
+	BuildSignalGroups();
+
+	// Scenario-defined controllers take over the signals they list.
+	for (const FOSCSignalController& Def : Scenario.SignalControllers)
+	{
+		FSignalControllerRuntime Ctrl;
+		Ctrl.Def = &Def;
+		Ctrl.Elapsed = -FMath::Max(0.0, Def.Delay);
+		for (const FOSCSignalPhase& Phase : Def.Phases)
+		{
+			for (const FOSCSignalStateEntry& Entry : Phase.States)
+			{
+				if (const int32* Index = SignalById.Find(Entry.SignalId))
+				{
+					Signals[*Index].bManual = true;
+				}
+			}
+		}
+		SignalControllers.Add(Ctrl);
+	}
+	for (FSignalControllerRuntime& Ctrl : SignalControllers)
+	{
+		ApplyControllerPhase(Ctrl);
+	}
+}
+
+void UOpenScenarioRunner::BuildSignalGroups()
+{
+	TArray<double> Heading;
+	Heading.SetNumZeroed(Signals.Num());
+	for (int32 i = 0; i < Signals.Num(); ++i)
+	{
+		const FOpenDriveRoad* Road = Map->FindRoad(Signals[i].RoadId);
+		if (Road)
+		{
+			double X, Y, H;
+			Map->EvaluateReferenceLine(*Road, Signals[i].S, X, Y, H);
+			Heading[i] = H + (Signals[i].Orientation == EOpenDriveSignalOrientation::Minus ? kPi : 0.0);
+		}
+	}
+
+	TMap<FString, int32> ControllerGroupOf; // signal id -> group
+	TArray<int32> GroupHeadingSignal;
+
+	for (const FOpenDriveController& Ctrl : Map->GetControllers())
+	{
+		int32 Group = INDEX_NONE;
+		for (const FOpenDriveControllerEntry& Entry : Ctrl.Controls)
+		{
+			const int32* Index = SignalById.Find(Entry.SignalId);
+			if (!Index || Signals[*Index].Kind != EOSCSignalKind::TrafficLight || Signals[*Index].Group != INDEX_NONE)
+			{
+				continue;
+			}
+			if (Group == INDEX_NONE)
+			{
+				Group = SignalGroups.AddDefaulted();
+				GroupHeadingSignal.Add(*Index);
+			}
+			SignalGroups[Group].Signals.Add(*Index);
+			Signals[*Index].Group = Group;
+		}
+	}
+
+	for (int32 i = 0; i < Signals.Num(); ++i)
+	{
+		FRuntimeSignal& Sig = Signals[i];
+		if (Sig.Kind != EOSCSignalKind::TrafficLight || Sig.Group != INDEX_NONE)
+		{
+			continue;
+		}
+		int32 Group = INDEX_NONE;
+		if (!Sig.JunctionId.IsEmpty())
+		{
+			for (int32 g = 0; g < SignalGroups.Num() && Group == INDEX_NONE; ++g)
+			{
+				const FRuntimeSignal& Other = Signals[GroupHeadingSignal[g]];
+				if (Other.JunctionId == Sig.JunctionId && FMath::Abs(FMath::Sin(Heading[i] - Heading[GroupHeadingSignal[g]])) < 0.5)
+				{
+					Group = g;
+				}
+			}
+		}
+		if (Group == INDEX_NONE)
+		{
+			Group = SignalGroups.AddDefaulted();
+			GroupHeadingSignal.Add(i);
+		}
+		SignalGroups[Group].Signals.Add(i);
+		Sig.Group = Group;
+	}
+
+	// Groups that regulate the same junction alternate; everything else cycles on its own.
+	TMap<FString, int32> ClusterOfJunction;
+	for (int32 g = 0; g < SignalGroups.Num(); ++g)
+	{
+		const FString& Junction = Signals[GroupHeadingSignal[g]].JunctionId;
+		int32 Cluster = INDEX_NONE;
+		if (!Junction.IsEmpty())
+		{
+			if (const int32* Found = ClusterOfJunction.Find(Junction))
+			{
+				Cluster = *Found;
+			}
+		}
+		if (Cluster == INDEX_NONE)
+		{
+			Cluster = SignalClusters.AddDefaulted();
+			if (!Junction.IsEmpty())
+			{
+				ClusterOfJunction.Add(Junction, Cluster);
+			}
+		}
+		SignalGroups[g].Cluster = Cluster;
+		SignalGroups[g].IndexInCluster = SignalClusters[Cluster].Groups.Num();
+		SignalClusters[Cluster].Groups.Add(g);
+	}
+}
+
+void UOpenScenarioRunner::ApplyControllerPhase(FSignalControllerRuntime& Ctrl)
+{
+	if (!Ctrl.Def || !Ctrl.Def->Phases.IsValidIndex(Ctrl.Phase))
+	{
+		return;
+	}
+	for (const FOSCSignalStateEntry& Entry : Ctrl.Def->Phases[Ctrl.Phase].States)
+	{
+		if (const int32* Index = SignalById.Find(Entry.SignalId))
+		{
+			SetSignalState(*Index, ParseSignalState(Entry.State));
+		}
+	}
+}
+
+void UOpenScenarioRunner::UpdateSignals(double Dt)
+{
+	if (Signals.Num() == 0)
+	{
+		return;
+	}
+
+	for (FSignalControllerRuntime& Ctrl : SignalControllers)
+	{
+		if (!Ctrl.Def || Ctrl.Def->Phases.Num() == 0)
+		{
+			continue;
+		}
+		Ctrl.Elapsed += Dt;
+		for (int32 Guard = 0; Guard < 16; ++Guard)
+		{
+			const double Duration = Ctrl.Def->Phases[Ctrl.Phase].Duration;
+			if (Duration <= 0.0 || Ctrl.Elapsed < Duration)
+			{
+				break;
+			}
+			Ctrl.Elapsed -= Duration;
+			Ctrl.Phase = (Ctrl.Phase + 1) % Ctrl.Def->Phases.Num();
+			ApplyControllerPhase(Ctrl);
+		}
+	}
+
+	if (!SignalSettings.bAutoCycleTrafficLights)
+	{
+		return;
+	}
+	const double G = FMath::Max(0.1, SignalSettings.GreenTime);
+	const double Y = FMath::Max(0.0, SignalSettings.YellowTime);
+	const double AllRed = FMath::Max(0.0, SignalSettings.AllRedTime);
+	for (const FSignalCluster& Cluster : SignalClusters)
+	{
+		const int32 K = Cluster.Groups.Num();
+		if (K == 0)
+		{
+			continue;
+		}
+		int32 Active = INDEX_NONE;
+		EOpenScenarioSignalState ActiveState = EOpenScenarioSignalState::Red;
+		if (K == 1)
+		{
+			const double Period = G + Y + 0.5 * G;
+			const double T = FMath::Fmod(SimTime, Period);
+			Active = 0;
+			ActiveState = T < G ? EOpenScenarioSignalState::Green : (T < G + Y ? EOpenScenarioSignalState::Yellow : EOpenScenarioSignalState::Red);
+		}
+		else
+		{
+			const double Slot = G + Y + AllRed;
+			const double T = FMath::Fmod(SimTime, Slot * K);
+			Active = FMath::Min(K - 1, static_cast<int32>(T / Slot));
+			const double Within = T - Active * Slot;
+			ActiveState = Within < G ? EOpenScenarioSignalState::Green : (Within < G + Y ? EOpenScenarioSignalState::Yellow : EOpenScenarioSignalState::Red);
+		}
+		for (int32 i = 0; i < K; ++i)
+		{
+			const EOpenScenarioSignalState State = i == Active ? ActiveState : EOpenScenarioSignalState::Red;
+			for (int32 SigIndex : SignalGroups[Cluster.Groups[i]].Signals)
+			{
+				if (!Signals[SigIndex].bManual)
+				{
+					SetSignalState(SigIndex, State);
+				}
+			}
+		}
+	}
+}
+
+void UOpenScenarioRunner::StartSignalAction(const FOSCAction& Action)
+{
+	if (Action.Type == EOSCActionType::TrafficSignalState)
+	{
+		if (!SetSignalStateById(Action.SignalId, ParseSignalState(Action.SignalState)))
+		{
+			UE_LOG(LogOpenScenario, Warning, TEXT("TrafficSignalStateAction: unknown signal '%s'."), *Action.SignalId);
+		}
+		return;
+	}
+	for (FSignalControllerRuntime& Ctrl : SignalControllers)
+	{
+		if (Ctrl.Def && Ctrl.Def->Name == Action.ControllerRef)
+		{
+			for (int32 i = 0; i < Ctrl.Def->Phases.Num(); ++i)
+			{
+				if (Ctrl.Def->Phases[i].Name == Action.ControllerPhase)
+				{
+					Ctrl.Phase = i;
+					Ctrl.Elapsed = 0.0;
+					ApplyControllerPhase(Ctrl);
+					return;
+				}
+			}
+			UE_LOG(LogOpenScenario, Warning, TEXT("TrafficSignalControllerAction: controller '%s' has no phase '%s'."), *Action.ControllerRef, *Action.ControllerPhase);
+			return;
+		}
+	}
+	UE_LOG(LogOpenScenario, Warning, TEXT("TrafficSignalControllerAction: unknown controller '%s'."), *Action.ControllerRef);
+}
+
+bool UOpenScenarioRunner::JunctionOccupied(const FRuntimeSignal& Signal, const FOSCEntityState* Self) const
+{
+	if (Signal.JunctionId.IsEmpty() || !Map.IsValid())
+	{
+		return false;
+	}
+	for (const FOSCEntityState& Other : Entities)
+	{
+		if (!Other.bActive || &Other == Self || !Other.bOnRoad)
+		{
+			continue;
+		}
+		const FOpenDriveRoad* Road = Map->FindRoad(Other.RoadId);
+		if (Road && Road->JunctionId == Signal.JunctionId)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void UOpenScenarioRunner::CollectSignalsBetween(const FRoadCursor& Before, const FRoadCursor& After, double BaseDist, TFunctionRef<void(int32, double)> Callback) const
+{
+	if (!Map.IsValid() || Signals.Num() == 0)
+	{
+		return;
+	}
+	// Signals in [S0, S1) along the direction of travel; Dist is measured from S0.
+	auto Scan = [&](const FString& RoadId, bool bForward, double S0, double S1, double Base)
+	{
+		const TArray<int32>* List = RoadSignals.Find(RoadId);
+		if (!List)
+		{
+			return;
+		}
+		for (int32 Index : *List)
+		{
+			const FRuntimeSignal& Sig = Signals[Index];
+			const bool bApplies = bForward ? Sig.Orientation != EOpenDriveSignalOrientation::Minus : Sig.Orientation != EOpenDriveSignalOrientation::Plus;
+			if (!bApplies)
+			{
+				continue;
+			}
+			const bool bInside = bForward ? (Sig.S >= S0 - 1e-9 && Sig.S < S1) : (Sig.S <= S0 + 1e-9 && Sig.S > S1);
+			if (bInside)
+			{
+				Callback(Index, Base + FMath::Abs(Sig.S - S0));
+			}
+		}
+	};
+
+	if (Before.RoadId == After.RoadId)
+	{
+		Scan(Before.RoadId, Before.bForward, Before.S, After.S, BaseDist);
+		return;
+	}
+	const FOpenDriveRoad* Old = Map->FindRoad(Before.RoadId);
+	if (!Old)
+	{
+		return;
+	}
+	const double End = Before.bForward ? Old->Length + 1e-6 : -1e-6;
+	Scan(Before.RoadId, Before.bForward, Before.S, End, BaseDist);
+	const double OldRemaining = Before.bForward ? Old->Length - Before.S : Before.S;
+	const FOpenDriveRoad* Next = Map->FindRoad(After.RoadId);
+	if (Next)
+	{
+		Scan(After.RoadId, After.bForward, After.bForward ? 0.0 : Next->Length, After.S, BaseDist + OldRemaining);
 	}
 }

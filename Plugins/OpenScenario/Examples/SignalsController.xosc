@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A scenario signal controller drives the light at road 10: red for 12 s, then green until a controller action restores red at t = 30 s. Late appears as soon as the light is green -->
+<OpenSCENARIO>
+  <FileHeader revMajor="1" revMinor="1" date="2025-01-01T00:00:00" description="A scenario signal controller drives the light at road 10: red for 12 s, then green until a controller action restores red at t = 30 s. Late appears as soon as the light is green" author="OpenSCENARIO_UE" />
+  <ParameterDeclarations />
+  <CatalogLocations />
+  <RoadNetwork>
+    <LogicFile filepath="SignalRoad.xodr" />
+    <TrafficSignals>
+      <TrafficSignalController name="MainLight" delay="0">
+        <Phase name="Stop" duration="12"><TrafficSignalState trafficSignalId="10" state="red" /></Phase>
+        <Phase name="Go" duration="0"><TrafficSignalState trafficSignalId="10" state="green" /></Phase>
+      </TrafficSignalController>
+    </TrafficSignals>
+  </RoadNetwork>
+  <Entities>
+    <ScenarioObject name="Ego">
+      <Vehicle name="EgoCar" vehicleCategory="car">
+        <BoundingBox><Center x="1.4" y="0.0" z="0.75" /><Dimensions width="1.8" length="4.5" height="1.5" /></BoundingBox>
+        <Performance maxSpeed="60" maxAcceleration="3.5" maxDeceleration="8" />
+      </Vehicle>
+    </ScenarioObject>
+    <ScenarioObject name="Late">
+      <Vehicle name="LateCar" vehicleCategory="car">
+        <BoundingBox><Center x="1.4" y="0.0" z="0.75" /><Dimensions width="1.8" length="4.5" height="1.5" /></BoundingBox>
+        <Performance maxSpeed="60" maxAcceleration="3.5" maxDeceleration="8" />
+      </Vehicle>
+    </ScenarioObject>
+  </Entities>
+  <Storyboard>
+    <Init>
+      <Actions>
+        <Private entityRef="Ego">
+          <PrivateAction><TeleportAction><Position><LanePosition roadId="10" laneId="-1" s="5.0" offset="0.0" /></Position></TeleportAction></PrivateAction>
+          <PrivateAction><LongitudinalAction><SpeedAction><SpeedActionDynamics dynamicsShape="step" value="0" dynamicsDimension="time" /><SpeedActionTarget><AbsoluteTargetSpeed value="12" /></SpeedActionTarget></SpeedAction></LongitudinalAction></PrivateAction>
+        </Private>
+        <Private entityRef="Late">
+          <PrivateAction><TeleportAction><Position><WorldPosition x="-500" y="0" z="0" h="0" /></Position></TeleportAction></PrivateAction>
+        </Private>
+      </Actions>
+    </Init>
+    <Story name="MainStory">
+      <Act name="MainAct">
+        <ManeuverGroup maximumExecutionCount="1" name="LateGroup">
+          <Actors selectTriggeringEntities="false"><EntityRef entityRef="Late" /></Actors>
+          <Maneuver name="Appear">
+            <Event name="Appear" priority="overwrite" maximumExecutionCount="1">
+                <Action name="Place"><PrivateAction><TeleportAction><Position><LanePosition roadId="10" laneId="-1" s="40.0" offset="0.0" /></Position></TeleportAction></PrivateAction></Action>
+                <Action name="Go"><PrivateAction><LongitudinalAction><SpeedAction><SpeedActionDynamics dynamicsShape="step" value="0" dynamicsDimension="time" /><SpeedActionTarget><AbsoluteTargetSpeed value="12" /></SpeedActionTarget></SpeedAction></LongitudinalAction></PrivateAction></Action>
+
+              <StartTrigger><ConditionGroup><Condition name="LightGreen" delay="0" conditionEdge="rising"><ByValueCondition><TrafficSignalCondition name="10" state="green" /></ByValueCondition></Condition></ConditionGroup></StartTrigger>
+            </Event>
+            <Event name="RestoreRed" priority="overwrite" maximumExecutionCount="1">
+                <Action name="Back"><GlobalAction><InfrastructureAction><TrafficSignalAction><TrafficSignalControllerAction trafficSignalControllerRef="MainLight" phase="Stop" /></TrafficSignalAction></InfrastructureAction></GlobalAction></Action>
+              <StartTrigger><ConditionGroup><Condition name="At30" delay="0" conditionEdge="rising"><ByValueCondition><SimulationTimeCondition value="30" rule="greaterOrEqual" /></ByValueCondition></Condition></ConditionGroup></StartTrigger>
+            </Event>
+          </Maneuver>
+        </ManeuverGroup>
+        <StartTrigger><ConditionGroup><Condition name="Start" delay="0" conditionEdge="rising"><ByValueCondition><SimulationTimeCondition value="0" rule="greaterOrEqual" /></ByValueCondition></Condition></ConditionGroup></StartTrigger>
+      </Act>
+    </Story>
+    <StopTrigger><ConditionGroup><Condition name="Timeout" delay="0" conditionEdge="rising"><ByValueCondition><SimulationTimeCondition value="45" rule="greaterThan" /></ByValueCondition></Condition></ConditionGroup></StopTrigger>
+  </Storyboard>
+</OpenSCENARIO>

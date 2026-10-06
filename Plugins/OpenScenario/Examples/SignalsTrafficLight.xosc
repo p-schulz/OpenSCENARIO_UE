@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The traffic light at road 10 is held red by the scenario; the Ego stops at the line and drives on when it is set to green at t = 14 s -->
+<OpenSCENARIO>
+  <FileHeader revMajor="1" revMinor="1" date="2025-01-01T00:00:00" description="The traffic light at road 10 is held red by the scenario; the Ego stops at the line and drives on when it is set to green at t = 14 s" author="OpenSCENARIO_UE" />
+  <ParameterDeclarations />
+  <CatalogLocations />
+  <RoadNetwork>
+    <LogicFile filepath="SignalRoad.xodr" />
+  </RoadNetwork>
+  <Entities>
+    <ScenarioObject name="Ego">
+      <Vehicle name="EgoCar" vehicleCategory="car">
+        <BoundingBox><Center x="1.4" y="0.0" z="0.75" /><Dimensions width="1.8" length="4.5" height="1.5" /></BoundingBox>
+        <Performance maxSpeed="60" maxAcceleration="3.5" maxDeceleration="8" />
+      </Vehicle>
+    </ScenarioObject>
+  </Entities>
+  <Storyboard>
+    <Init>
+      <Actions>
+        <GlobalAction><InfrastructureAction><TrafficSignalAction><TrafficSignalStateAction name="10" state="red" /></TrafficSignalAction></InfrastructureAction></GlobalAction>
+        <Private entityRef="Ego">
+          <PrivateAction><TeleportAction><Position><LanePosition roadId="10" laneId="-1" s="5.0" offset="0.0" /></Position></TeleportAction></PrivateAction>
+          <PrivateAction><LongitudinalAction><SpeedAction><SpeedActionDynamics dynamicsShape="step" value="0" dynamicsDimension="time" /><SpeedActionTarget><AbsoluteTargetSpeed value="12" /></SpeedActionTarget></SpeedAction></LongitudinalAction></PrivateAction>
+        </Private>
+      </Actions>
+    </Init>
+    <Story name="MainStory">
+      <Act name="MainAct">
+        <ManeuverGroup maximumExecutionCount="1" name="EgoGroup">
+          <Actors selectTriggeringEntities="false"><EntityRef entityRef="Ego" /></Actors>
+          <Maneuver name="Release">
+            <Event name="LightGreen" priority="overwrite" maximumExecutionCount="1">
+                <Action name="SetGreen"><GlobalAction><InfrastructureAction><TrafficSignalAction><TrafficSignalStateAction name="10" state="green" /></TrafficSignalAction></InfrastructureAction></GlobalAction></Action>
+
+              <StartTrigger><ConditionGroup><Condition name="At14" delay="0" conditionEdge="rising"><ByValueCondition><SimulationTimeCondition value="14" rule="greaterOrEqual" /></ByValueCondition></Condition></ConditionGroup></StartTrigger>
+            </Event>
+          </Maneuver>
+        </ManeuverGroup>
+        <StartTrigger><ConditionGroup><Condition name="Start" delay="0" conditionEdge="rising"><ByValueCondition><SimulationTimeCondition value="0" rule="greaterOrEqual" /></ByValueCondition></Condition></ConditionGroup></StartTrigger>
+      </Act>
+    </Story>
+    <StopTrigger><ConditionGroup><Condition name="Timeout" delay="0" conditionEdge="rising"><ByValueCondition><SimulationTimeCondition value="40" rule="greaterThan" /></ByValueCondition></Condition></ConditionGroup></StopTrigger>
+  </Storyboard>
+</OpenSCENARIO>

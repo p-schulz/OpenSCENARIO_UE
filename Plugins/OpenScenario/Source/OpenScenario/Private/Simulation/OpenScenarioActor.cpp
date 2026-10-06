@@ -36,6 +36,7 @@ void AOpenScenarioActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		Runner->OnFinished.RemoveAll(this);
 		Runner->OnEntitySpawned.RemoveAll(this);
+		Runner->OnSignalChanged.RemoveAll(this);
 		Runner->Stop(true);
 		Runner = nullptr;
 	}
@@ -63,9 +64,11 @@ bool AOpenScenarioActor::StartScenario()
 	Runner->DefaultMiscObjectClass = MiscObjectActorClass;
 	Runner->EntityClassOverrides = EntityActorClasses;
 	Runner->Dynamics = Dynamics;
+	Runner->SignalSettings = SignalSettings;
 	Runner->TrafficSettings = Traffic;
 	Runner->OnFinished.AddUObject(this, &AOpenScenarioActor::HandleFinished);
 	Runner->OnEntitySpawned.AddUObject(this, &AOpenScenarioActor::HandleEntitySpawned);
+	Runner->OnSignalChanged.AddUObject(this, &AOpenScenarioActor::HandleSignalChanged);
 
 	Accumulator = 0.0;
 	if (!Runner->Initialize(World, Scenario))
@@ -157,6 +160,16 @@ int32 AOpenScenarioActor::GetActiveTrafficCount() const
 	return Runner ? Runner->GetTrafficCount() : 0;
 }
 
+bool AOpenScenarioActor::GetSignalState(const FString& SignalId, EOpenScenarioSignalState& OutState) const
+{
+	return Runner && Runner->GetSignalState(SignalId, OutState);
+}
+
+bool AOpenScenarioActor::SetSignalState(const FString& SignalId, EOpenScenarioSignalState NewState)
+{
+	return Runner && Runner->SetSignalStateById(SignalId, NewState);
+}
+
 bool AOpenScenarioActor::GetEntityDynamics(const FString& EntityName, double& OutSpeed, double& OutDesiredSpeed, double& OutLeaderGap, FString& OutLeaderName) const
 {
 	const FOSCEntityState* State = Runner ? Runner->GetEntityState(EntityName) : nullptr;
@@ -177,6 +190,7 @@ void AOpenScenarioActor::StopScenario()
 	{
 		Runner->OnFinished.RemoveAll(this);
 		Runner->OnEntitySpawned.RemoveAll(this);
+		Runner->OnSignalChanged.RemoveAll(this);
 		Runner->Stop(true);
 		Runner = nullptr;
 	}
@@ -207,6 +221,10 @@ double AOpenScenarioActor::GetEntitySpeed(const FString& EntityName) const
 void AOpenScenarioActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	if (bDrawSignals && Runner)
+	{
+		DrawSignals();
+	}
 	if (PlaybackState != EOpenScenarioPlaybackState::Playing || !Runner || !Runner->IsRunning())
 	{
 		return;
@@ -239,6 +257,47 @@ void AOpenScenarioActor::HandleFinished()
 void AOpenScenarioActor::HandleEntitySpawned(const FString& Name, AActor* Actor)
 {
 	OnEntitySpawned.Broadcast(Name, Actor);
+}
+
+void AOpenScenarioActor::HandleSignalChanged(const FString& SignalId, EOpenScenarioSignalState State)
+{
+	OnSignalStateChanged.Broadcast(SignalId, State);
+}
+
+void AOpenScenarioActor::DrawSignals() const
+{
+	UWorld* World = GetWorld();
+	if (!World || !Runner)
+	{
+		return;
+	}
+	const FTransform Origin = GetActorTransform();
+	for (const FRuntimeSignal& Sig : Runner->GetSignals())
+	{
+		const FVector Base = Origin.TransformPosition(OpenScenarioCoords::ToUnrealLocation(Sig.X, Sig.Y, Sig.Z));
+		FColor Color = FColor::White;
+		float Radius = 25.f;
+		switch (Sig.Kind)
+		{
+		case EOSCSignalKind::TrafficLight:
+			Color = Sig.State == EOpenScenarioSignalState::Red ? FColor::Red
+				: Sig.State == EOpenScenarioSignalState::Yellow ? FColor::Yellow
+				: Sig.State == EOpenScenarioSignalState::Green ? FColor::Green : FColor(80, 80, 80);
+			Radius = 40.f;
+			break;
+		case EOSCSignalKind::Stop: Color = FColor::Orange; break;
+		case EOSCSignalKind::Yield: Color = FColor::Cyan; break;
+		case EOSCSignalKind::SpeedLimit: Color = FColor::Blue; break;
+		default: break;
+		}
+		const FVector Top = Base + FVector(0.f, 0.f, 300.f);
+		DrawDebugLine(World, Base, Top, FColor(120, 120, 120), false, -1.f, 0, 2.f);
+		DrawDebugSphere(World, Top, Radius, 8, Color, false, -1.f, 0, 2.f);
+		if (Sig.Kind == EOSCSignalKind::SpeedLimit)
+		{
+			DrawDebugString(World, Top + FVector(0.f, 0.f, 50.f), FString::Printf(TEXT("%.0f"), Sig.SpeedLimit * 3.6), nullptr, FColor::White, 0.f);
+		}
+	}
 }
 
 void AOpenScenarioActor::DrawRoadNetwork()

@@ -602,6 +602,10 @@ FString FOSCModelEdit::DescribeAction(const FOSCAction& A)
 		return FString::Printf(TEXT("Route (%d waypoints)"), A.Waypoints.Num());
 	case EOSCActionType::FollowTrajectory:
 		return FString::Printf(TEXT("Trajectory (%d vertices)"), A.Vertices.Num());
+	case EOSCActionType::TrafficSignalState:
+		return FString::Printf(TEXT("Signal %s -> %s"), *A.SignalId, *A.SignalState);
+	case EOSCActionType::TrafficSignalController:
+		return FString::Printf(TEXT("Signal controller %s -> phase %s"), *A.ControllerRef, *A.ControllerPhase);
 	case EOSCActionType::Traffic:
 		switch (A.Traffic.Kind)
 		{
@@ -632,6 +636,7 @@ FString FOSCModelEdit::DescribeCondition(const FOSCCondition& C)
 	case EOSCConditionType::Distance: return FString::Printf(TEXT("%s dist to %s %s %s"), *Who, *DescribePosition(C.Position), RuleSymbol(C.Rule), *Num(C.Value));
 	case EOSCConditionType::RelativeDistance: return FString::Printf(TEXT("%s dist to %s %s %s"), *Who, *C.EntityRef, RuleSymbol(C.Rule), *Num(C.Value));
 	case EOSCConditionType::TimeHeadway: return FString::Printf(TEXT("%s headway to %s %s %s"), *Who, *C.EntityRef, RuleSymbol(C.Rule), *Num(C.Value));
+	case EOSCConditionType::TrafficSignal: return FString::Printf(TEXT("signal %s is %s"), *C.SignalId, *C.SignalState);
 	case EOSCConditionType::Collision: return FString::Printf(TEXT("%s collides with %s"), *Who, *C.EntityRef);
 	default: return FString::Printf(TEXT("Unsupported <%s>"), *C.UnsupportedTag);
 	}
@@ -725,6 +730,13 @@ void FOSCModelEdit::Validate(const FOSCScenario& S, TArray<FString>& Issues)
 		if (A.Type == EOSCActionType::Unsupported) { Issues.Add(FString::Printf(TEXT("%s: unsupported action <%s> will not be saved."), *Where, *A.UnsupportedTag)); }
 		if ((A.Type == EOSCActionType::Speed && A.bSpeedRelative) || (A.Type == EOSCActionType::LaneChange && A.bLaneRelative)) { CheckEntity(A.RefEntity, Where); }
 		CheckPosition(A.Position, Where);
+		if (A.Type == EOSCActionType::TrafficSignalController)
+		{
+			const FOSCSignalController* Ctrl = nullptr;
+			for (const FOSCSignalController& C : S.SignalControllers) { if (C.Name == A.ControllerRef) { Ctrl = &C; } }
+			if (!Ctrl) { Issues.Add(FString::Printf(TEXT("%s: unknown signal controller '%s'."), *Where, *A.ControllerRef)); }
+			else if (!Ctrl->Phases.ContainsByPredicate([&](const FOSCSignalPhase& P) { return P.Name == A.ControllerPhase; })) { Issues.Add(FString::Printf(TEXT("%s: controller '%s' has no phase '%s'."), *Where, *A.ControllerRef, *A.ControllerPhase)); }
+		}
 		if (A.Type == EOSCActionType::Traffic)
 		{
 			if (A.Traffic.Kind == EOSCTrafficKind::Swarm) { CheckEntity(A.Traffic.CentralObject, Where); }
