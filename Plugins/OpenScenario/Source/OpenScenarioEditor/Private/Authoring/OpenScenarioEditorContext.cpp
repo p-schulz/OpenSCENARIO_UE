@@ -63,7 +63,6 @@ void FOpenScenarioEditorContext::SetAsset(UOpenScenarioAsset* NewAsset)
 	}
 	UnbindAsset();
 	Asset = NewAsset;
-	CachedMap.Reset();
 	Selection = FOSCNodeRef();
 	if (NewAsset)
 	{
@@ -91,7 +90,6 @@ void FOpenScenarioEditorContext::HandleAssetReparsed()
 	}
 	// The asset text changed from outside (details panel, undo, reimport): follow it unless the user has
 	// unapplied edits, which stay until they Apply or Revert.
-	CachedMap.Reset();
 	if (!bDirty)
 	{
 		ReloadWorking();
@@ -154,7 +152,6 @@ bool FOpenScenarioEditorContext::Apply(bool bConfirmLossy)
 	bApplying = false;
 	A->MarkPackageDirty();
 
-	CachedMap.Reset();
 	ReloadWorking();
 	OnStructureChanged.Broadcast();
 	OnVisualizationChanged.Broadcast();
@@ -467,17 +464,10 @@ const UClass* FOpenScenarioEditorContext::GetKindActorClass(EOSCEntityKind Kind)
 
 TSharedPtr<const FOpenDriveMap> FOpenScenarioEditorContext::GetMap() const
 {
+	// Not cached: the road network can be edited in the OpenDRIVE plugin's editor at any time and
+	// UOpenScenarioAsset::ResolveRoadNetwork is cheap.
 	UOpenScenarioAsset* A = Asset.Get();
-	if (!A)
-	{
-		return nullptr;
-	}
-	if (!CachedMap.IsValid() || CachedMapAsset.Get() != A)
-	{
-		CachedMap = A->ResolveRoadNetwork();
-		CachedMapAsset = A;
-	}
-	return CachedMap;
+	return A ? A->ResolveRoadNetwork() : nullptr;
 }
 
 FTransform FOpenScenarioEditorContext::ResolveOrigin() const

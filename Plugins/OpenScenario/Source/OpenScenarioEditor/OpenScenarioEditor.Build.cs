@@ -11,7 +11,8 @@ public class OpenScenarioEditor : ModuleRules
 			"Core",
 			"CoreUObject",
 			"Engine",
-			"OpenScenario"
+			"OpenScenario",
+			"OpenDrive"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]
@@ -28,7 +29,8 @@ public class OpenScenarioEditor : ModuleRules
 			"AssetRegistry",
 			"AssetDefinition",
 			"WorkspaceMenuStructure",
-			"ClassViewer"
+			"ClassViewer",
+			"OpenDriveEditor"
 		});
 	}
 }

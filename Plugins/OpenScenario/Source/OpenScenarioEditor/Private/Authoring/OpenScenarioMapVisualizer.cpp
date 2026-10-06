@@ -86,6 +86,10 @@ void FOpenScenarioMapVisualizer::Rebuild(FOpenScenarioEditorContext& Context)
 				{
 					for (const FOpenDriveLane& Lane : Section->Lanes)
 					{
+						if (Lane.Id == 0)
+						{
+							continue; // the centre lane has no extent
+						}
 						const double Center = Map->GetLaneCenterT(Road, S, Lane.Id);
 						const double Half = 0.5 * Lane.GetWidth(S);
 						const double Outer = Center + (Lane.Id > 0 ? Half : -Half);
